@@ -1,0 +1,200 @@
+2026-09-28 23:52:04,805 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Parsing xcam data - all fields: ['allow_skip_parts', 'buildplate_marker_detector', 'first_layer_inspector', 'halt_print_sensitivity', 'print_halt', 'printing_monitor', 'spaghetti_detector']
+2026-09-28 23:52:04,807 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received gcode_state: RUNNING, gcode_file: /data/Metadata/plate_1.gcode, subtask_name: NFC_16_Rear_Frames_-_Matte_Charcoal_-_Magi_-_Carbon_Fiber
+2026-09-28 23:52:04,809 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] ams_extruder_map: {'0': 0, '1': 0, '2': 0}
+2026-09-28 23:52:04,809 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received command response: push_status
+2026-09-28 23:52:04,810 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper raw value: 38.0
+2026-09-28 23:52:04,811 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper direct value: 38.0°C (heater OFF)
+2026-09-28 23:52:04,812 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] HMS data received: []
+2026-09-28 23:52:04,812 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] lights_report: [{'mode': 'on', 'node': 'chamber_light'}, {'mode': 'flashing', 'node': 'work_light'}]
+2026-09-28 23:52:04,813 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] gcode_state: RUNNING -> RUNNING, file: /data/Metadata/plate_1.gcode, subtask: NFC_16_Rear_Frames_-_Matte_Charcoal_-_Magi_-_Carbon_Fiber
+2026-09-28 23:52:05,268 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Found xcam inside print data: {'allow_skip_parts': False, 'buildplate_marker_detector': True, 'first_layer_inspector': True, 'halt_print_sensitivity': 'medium', 'print_halt': True, 'printing_monitor': True, 'spaghetti_detector': True}
+2026-09-28 23:52:05,269 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Parsing xcam data - all fields: ['allow_skip_parts', 'buildplate_marker_detector', 'first_layer_inspector', 'halt_print_sensitivity', 'print_halt', 'printing_monitor', 'spaghetti_detector']
+2026-09-28 23:52:05,269 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received gcode_state: RUNNING, gcode_file: /data/Metadata/plate_1.gcode, subtask_name: NFC_16_Front_Frames_-_Charcoal_Mistletoe_-_Quadrahedron_-_Carbon_Fiber
+2026-09-28 23:52:05,270 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] ams_extruder_map: {'0': 0, '1': 0, '2': 0}
+2026-09-28 23:52:05,270 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received command response: push_status
+2026-09-28 23:52:05,271 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper raw value: 40.0
+2026-09-28 23:52:05,271 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper direct value: 40.0°C (heater OFF)
+2026-09-28 23:52:05,271 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] HMS data received: []
+2026-09-28 23:52:05,272 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] lights_report: [{'mode': 'on', 'node': 'chamber_light'}, {'mode': 'flashing', 'node': 'work_light'}]
+2026-09-28 23:52:05,272 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] gcode_state: RUNNING -> RUNNING, file: /data/Metadata/plate_1.gcode, subtask: NFC_16_Front_Frames_-_Charcoal_Mistletoe_-_Quadrahedron_-_Carbon_Fiber
+2026-09-28 23:52:05,351 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] AMS 0 firmware: 00.01.06.62
+2026-09-28 23:52:05,351 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] AMS 1 firmware: 00.01.06.62
+2026-09-28 23:52:05,352 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] AMS 2 firmware: 02.00.19.47
+2026-09-28 23:52:05,549 INFO [uvicorn.access] [-] [IP]:42352 - "POST /api/v1/spoolbuddy/scale/reading HTTP/1.1" 200
+2026-09-28 23:52:05,691 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Found xcam inside print data: {'allow_skip_parts': False, 'buildplate_marker_detector': True, 'first_layer_inspector': True, 'halt_print_sensitivity': 'medium', 'print_halt': True, 'printing_monitor': True, 'spaghetti_detector': True}
+2026-09-28 23:52:05,692 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Parsing xcam data - all fields: ['allow_skip_parts', 'buildplate_marker_detector', 'first_layer_inspector', 'halt_print_sensitivity', 'print_halt', 'printing_monitor', 'spaghetti_detector']
+2026-09-28 23:52:05,692 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received gcode_state: RUNNING, gcode_file: /data/Metadata/plate_1.gcode, subtask_name: Supersquared_7_Caps_and_7_Wheels_-_Smoke_PETG_-_Foopie
+2026-09-28 23:52:05,693 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] ams_extruder_map: {'0': 0, '1': 0, '2': 0}
+2026-09-28 23:52:05,694 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received command response: push_status
+2026-09-28 23:52:05,694 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper raw value: 40.0
+2026-09-28 23:52:05,695 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper direct value: 40.0°C (heater OFF)
+2026-09-28 23:52:05,696 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] HMS data received: [{'attr': 117469184, 'code': 131077}]
+2026-09-28 23:52:05,697 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] lights_report: [{'mode': 'on', 'node': 'chamber_light'}, {'mode': 'flashing', 'node': 'work_light'}]
+2026-09-28 23:52:05,697 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] gcode_state: RUNNING -> RUNNING, file: /data/Metadata/plate_1.gcode, subtask: Supersquared_7_Caps_and_7_Wheels_-_Smoke_PETG_-_Foopie
+2026-09-28 23:52:05,818 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Found xcam inside print data: {'allow_skip_parts': False, 'buildplate_marker_detector': True, 'first_layer_inspector': True, 'halt_print_sensitivity': 'medium', 'print_halt': True, 'printing_monitor': True, 'spaghetti_detector': True}
+2026-09-28 23:52:05,818 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Parsing xcam data - all fields: ['allow_skip_parts', 'buildplate_marker_detector', 'first_layer_inspector', 'halt_print_sensitivity', 'print_halt', 'printing_monitor', 'spaghetti_detector']
+2026-09-28 23:52:05,819 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received gcode_state: RUNNING, gcode_file: /data/Metadata/plate_1.gcode, subtask_name: NFC_16_Rear_Frames_-_Matte_Charcoal_-_Magi_-_Carbon_Fiber
+2026-09-28 23:52:05,819 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] ams_extruder_map: {'0': 0, '1': 0, '2': 0}
+2026-09-28 23:52:05,820 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received command response: push_status
+2026-09-28 23:52:05,821 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper raw value: 38.0
+2026-09-28 23:52:05,821 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper direct value: 38.0°C (heater OFF)
+2026-09-28 23:52:05,821 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] HMS data received: []
+2026-09-28 23:52:05,822 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] lights_report: [{'mode': 'on', 'node': 'chamber_light'}, {'mode': 'flashing', 'node': 'work_light'}]
+2026-09-28 23:52:05,823 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] gcode_state: RUNNING -> RUNNING, file: /data/Metadata/plate_1.gcode, subtask: NFC_16_Rear_Frames_-_Matte_Charcoal_-_Magi_-_Carbon_Fiber
+2026-09-28 23:52:06,286 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Found xcam inside print data: {'allow_skip_parts': False, 'buildplate_marker_detector': True, 'first_layer_inspector': True, 'halt_print_sensitivity': 'medium', 'print_halt': True, 'printing_monitor': True, 'spaghetti_detector': True}
+2026-09-28 23:52:06,287 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Parsing xcam data - all fields: ['allow_skip_parts', 'buildplate_marker_detector', 'first_layer_inspector', 'halt_print_sensitivity', 'print_halt', 'printing_monitor', 'spaghetti_detector']
+2026-09-28 23:52:06,287 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received gcode_state: RUNNING, gcode_file: /data/Metadata/plate_1.gcode, subtask_name: NFC_16_Front_Frames_-_Charcoal_Mistletoe_-_Quadrahedron_-_Carbon_Fiber
+2026-09-28 23:52:06,288 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] ams_extruder_map: {'0': 0, '1': 0, '2': 0}
+2026-09-28 23:52:06,288 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received command response: push_status
+2026-09-28 23:52:06,289 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper raw value: 40.0
+2026-09-28 23:52:06,289 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper direct value: 40.0°C (heater OFF)
+2026-09-28 23:52:06,289 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] HMS data received: []
+2026-09-28 23:52:06,290 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] lights_report: [{'mode': 'on', 'node': 'chamber_light'}, {'mode': 'flashing', 'node': 'work_light'}]
+2026-09-28 23:52:06,290 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] gcode_state: RUNNING -> RUNNING, file: /data/Metadata/plate_1.gcode, subtask: NFC_16_Front_Frames_-_Charcoal_Mistletoe_-_Quadrahedron_-_Carbon_Fiber
+2026-09-28 23:52:06,374 INFO [uvicorn.access] [-] [IP]:42358 - "POST /api/v1/spoolbuddy/devices/spoolbuddy-scale-3bplus/heartbeat HTTP/1.1" 200
+2026-09-28 23:52:06,677 INFO [uvicorn.access] [-] [IP]:42370 - "POST /api/v1/spoolbuddy/scale/reading HTTP/1.1" 200
+2026-09-28 23:52:06,707 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Found xcam inside print data: {'allow_skip_parts': False, 'buildplate_marker_detector': True, 'first_layer_inspector': True, 'halt_print_sensitivity': 'medium', 'print_halt': True, 'printing_monitor': True, 'spaghetti_detector': True}
+2026-09-28 23:52:06,708 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Parsing xcam data - all fields: ['allow_skip_parts', 'buildplate_marker_detector', 'first_layer_inspector', 'halt_print_sensitivity', 'print_halt', 'printing_monitor', 'spaghetti_detector']
+2026-09-28 23:52:06,708 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received gcode_state: RUNNING, gcode_file: /data/Metadata/plate_1.gcode, subtask_name: Supersquared_7_Caps_and_7_Wheels_-_Smoke_PETG_-_Foopie
+2026-09-28 23:52:06,709 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] ams_extruder_map: {'0': 0, '1': 0, '2': 0}
+2026-09-28 23:52:06,709 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received command response: push_status
+2026-09-28 23:52:06,710 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper raw value: 40.0
+2026-09-28 23:52:06,710 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper direct value: 40.0°C (heater OFF)
+2026-09-28 23:52:06,710 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] HMS data received: [{'attr': 117469184, 'code': 131077}]
+2026-09-28 23:52:06,711 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] lights_report: [{'mode': 'on', 'node': 'chamber_light'}, {'mode': 'flashing', 'node': 'work_light'}]
+2026-09-28 23:52:06,712 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] gcode_state: RUNNING -> RUNNING, file: /data/Metadata/plate_1.gcode, subtask: Supersquared_7_Caps_and_7_Wheels_-_Smoke_PETG_-_Foopie
+2026-09-28 23:52:06,843 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Found xcam inside print data: {'allow_skip_parts': False, 'buildplate_marker_detector': True, 'first_layer_inspector': True, 'halt_print_sensitivity': 'medium', 'print_halt': True, 'printing_monitor': True, 'spaghetti_detector': True}
+2026-09-28 23:52:06,843 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Parsing xcam data - all fields: ['allow_skip_parts', 'buildplate_marker_detector', 'first_layer_inspector', 'halt_print_sensitivity', 'print_halt', 'printing_monitor', 'spaghetti_detector']
+2026-09-28 23:52:06,844 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received gcode_state: RUNNING, gcode_file: /data/Metadata/plate_1.gcode, subtask_name: NFC_16_Rear_Frames_-_Matte_Charcoal_-_Magi_-_Carbon_Fiber
+2026-09-28 23:52:06,845 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] ams_extruder_map: {'0': 0, '1': 0, '2': 0}
+2026-09-28 23:52:06,845 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received command response: push_status
+2026-09-28 23:52:06,846 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper raw value: 38.0
+2026-09-28 23:52:06,846 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper direct value: 38.0°C (heater OFF)
+2026-09-28 23:52:06,847 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] HMS data received: []
+2026-09-28 23:52:06,848 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] lights_report: [{'mode': 'on', 'node': 'chamber_light'}, {'mode': 'flashing', 'node': 'work_light'}]
+2026-09-28 23:52:06,849 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] gcode_state: RUNNING -> RUNNING, file: /data/Metadata/plate_1.gcode, subtask: NFC_16_Rear_Frames_-_Matte_Charcoal_-_Magi_-_Carbon_Fiber
+2026-09-28 23:52:07,298 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Found xcam inside print data: {'allow_skip_parts': False, 'buildplate_marker_detector': True, 'first_layer_inspector': True, 'halt_print_sensitivity': 'medium', 'print_halt': True, 'printing_monitor': True, 'spaghetti_detector': True}
+2026-09-28 23:52:07,298 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Parsing xcam data - all fields: ['allow_skip_parts', 'buildplate_marker_detector', 'first_layer_inspector', 'halt_print_sensitivity', 'print_halt', 'printing_monitor', 'spaghetti_detector']
+2026-09-28 23:52:07,299 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received gcode_state: RUNNING, gcode_file: /data/Metadata/plate_1.gcode, subtask_name: NFC_16_Front_Frames_-_Charcoal_Mistletoe_-_Quadrahedron_-_Carbon_Fiber
+2026-09-28 23:52:07,300 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] ams_extruder_map: {'0': 0, '1': 0, '2': 0}
+2026-09-28 23:52:07,320 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received command response: push_status
+2026-09-28 23:52:07,326 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper raw value: 40.0
+2026-09-28 23:52:07,328 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper direct value: 40.0°C (heater OFF)
+2026-09-28 23:52:07,336 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] HMS data received: []
+2026-09-28 23:52:07,339 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] lights_report: [{'mode': 'on', 'node': 'chamber_light'}, {'mode': 'flashing', 'node': 'work_light'}]
+2026-09-28 23:52:07,340 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] gcode_state: RUNNING -> RUNNING, file: /data/Metadata/plate_1.gcode, subtask: NFC_16_Front_Frames_-_Charcoal_Mistletoe_-_Quadrahedron_-_Carbon_Fiber
+2026-09-28 23:52:07,453 DEBUG [backend.app.api.routes.printers] [84581d29] API returning ams_mapping: [], ams_extruder_map: {'0': 0, '1': 0, '2': 0}
+2026-09-28 23:52:07,454 DEBUG [backend.app.api.routes.printers] [84581d29] Using tray_now directly as global ID: 10
+2026-09-28 23:52:07,466 DEBUG [backend.app.api.routes.printers] [eb53633b] API returning ams_mapping: [], ams_extruder_map: {'0': 0, '1': 0, '2': 0}
+2026-09-28 23:52:07,467 DEBUG [backend.app.api.routes.printers] [eb53633b] Using tray_now directly as global ID: 7
+2026-09-28 23:52:07,519 DEBUG [backend.app.api.routes.printers] [8d123449] API returning ams_mapping: [], ams_extruder_map: {'0': 0, '1': 0, '2': 0}
+2026-09-28 23:52:07,519 DEBUG [backend.app.api.routes.printers] [8d123449] Using tray_now directly as global ID: 6
+2026-09-28 23:52:07,739 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Found xcam inside print data: {'allow_skip_parts': False, 'buildplate_marker_detector': True, 'first_layer_inspector': True, 'halt_print_sensitivity': 'medium', 'print_halt': True, 'printing_monitor': True, 'spaghetti_detector': True}
+2026-09-28 23:52:07,739 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Parsing xcam data - all fields: ['allow_skip_parts', 'buildplate_marker_detector', 'first_layer_inspector', 'halt_print_sensitivity', 'print_halt', 'printing_monitor', 'spaghetti_detector']
+2026-09-28 23:52:07,740 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received gcode_state: RUNNING, gcode_file: /data/Metadata/plate_1.gcode, subtask_name: Supersquared_7_Caps_and_7_Wheels_-_Smoke_PETG_-_Foopie
+2026-09-28 23:52:07,740 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] ams_extruder_map: {'0': 0, '1': 0, '2': 0}
+2026-09-28 23:52:07,741 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received command response: push_status
+2026-09-28 23:52:07,741 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper raw value: 40.0
+2026-09-28 23:52:07,741 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper direct value: 40.0°C (heater OFF)
+2026-09-28 23:52:07,742 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] HMS data received: [{'attr': 117469184, 'code': 131077}]
+2026-09-28 23:52:07,742 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] lights_report: [{'mode': 'on', 'node': 'chamber_light'}, {'mode': 'flashing', 'node': 'work_light'}]
+2026-09-28 23:52:07,742 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] gcode_state: RUNNING -> RUNNING, file: /data/Metadata/plate_1.gcode, subtask: Supersquared_7_Caps_and_7_Wheels_-_Smoke_PETG_-_Foopie
+2026-09-28 23:52:07,865 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Found xcam inside print data: {'allow_skip_parts': False, 'buildplate_marker_detector': True, 'first_layer_inspector': True, 'halt_print_sensitivity': 'medium', 'print_halt': True, 'printing_monitor': True, 'spaghetti_detector': True}
+2026-09-28 23:52:07,866 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Parsing xcam data - all fields: ['allow_skip_parts', 'buildplate_marker_detector', 'first_layer_inspector', 'halt_print_sensitivity', 'print_halt', 'printing_monitor', 'spaghetti_detector']
+2026-09-28 23:52:07,866 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received gcode_state: RUNNING, gcode_file: /data/Metadata/plate_1.gcode, subtask_name: NFC_16_Rear_Frames_-_Matte_Charcoal_-_Magi_-_Carbon_Fiber
+2026-09-28 23:52:07,867 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] ams_extruder_map: {'0': 0, '1': 0, '2': 0}
+2026-09-28 23:52:07,868 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received command response: push_status
+2026-09-28 23:52:07,869 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper raw value: 38.0
+2026-09-28 23:52:07,870 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper direct value: 38.0°C (heater OFF)
+2026-09-28 23:52:07,870 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] HMS data received: []
+2026-09-28 23:52:07,871 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] lights_report: [{'mode': 'on', 'node': 'chamber_light'}, {'mode': 'flashing', 'node': 'work_light'}]
+2026-09-28 23:52:07,873 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] gcode_state: RUNNING -> RUNNING, file: /data/Metadata/plate_1.gcode, subtask: NFC_16_Rear_Frames_-_Matte_Charcoal_-_Magi_-_Carbon_Fiber
+2026-09-28 23:52:08,004 INFO [backend.app.services.print_scheduler] [-] Queue check: found 2 pending items: [(249, 1, None, 708), (269, 2, None, 758)]
+2026-09-28 23:52:08,095 INFO [uvicorn.access] [-] [IP]:42390 - "POST /api/v1/spoolbuddy/scale/reading HTTP/1.1" 200
+2026-09-28 23:52:08,263 INFO [backend.app.services.print_scheduler] [-] Queue: printer 1 unavailable — an item is already printing on it (now: connected=True, state=RUNNING, awaiting_plate_clear=False)
+2026-09-28 23:52:08,264 INFO [backend.app.services.print_scheduler] [-] Queue: printer 2 unavailable — an item is already printing on it (now: connected=True, state=RUNNING, awaiting_plate_clear=False)
+2026-09-28 23:52:08,264 INFO [backend.app.services.print_scheduler] [-] Queue: printer 3 unavailable — an item is already printing on it (now: connected=True, state=RUNNING, awaiting_plate_clear=False)
+2026-09-28 23:52:08,324 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Found xcam inside print data: {'allow_skip_parts': False, 'buildplate_marker_detector': True, 'first_layer_inspector': True, 'halt_print_sensitivity': 'medium', 'print_halt': True, 'printing_monitor': True, 'spaghetti_detector': True}
+2026-09-28 23:52:08,324 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Parsing xcam data - all fields: ['allow_skip_parts', 'buildplate_marker_detector', 'first_layer_inspector', 'halt_print_sensitivity', 'print_halt', 'printing_monitor', 'spaghetti_detector']
+2026-09-28 23:52:08,324 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received gcode_state: RUNNING, gcode_file: /data/Metadata/plate_1.gcode, subtask_name: NFC_16_Front_Frames_-_Charcoal_Mistletoe_-_Quadrahedron_-_Carbon_Fiber
+2026-09-28 23:52:08,325 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] ams_extruder_map: {'0': 0, '1': 0, '2': 0}
+2026-09-28 23:52:08,326 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received command response: push_status
+2026-09-28 23:52:08,326 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper raw value: 40.0
+2026-09-28 23:52:08,327 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper direct value: 40.0°C (heater OFF)
+2026-09-28 23:52:08,327 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] HMS data received: []
+2026-09-28 23:52:08,330 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] lights_report: [{'mode': 'on', 'node': 'chamber_light'}, {'mode': 'flashing', 'node': 'work_light'}]
+2026-09-28 23:52:08,334 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] gcode_state: RUNNING -> RUNNING, file: /data/Metadata/plate_1.gcode, subtask: NFC_16_Front_Frames_-_Charcoal_Mistletoe_-_Quadrahedron_-_Carbon_Fiber
+2026-09-28 23:52:08,609 DEBUG [backend.app.services.print_scheduler] [-] Auto-drying: printer 1 — checking 3 AMS units
+2026-09-28 23:52:08,609 DEBUG [backend.app.services.print_scheduler] [-] Auto-drying: printer 1 AMS 0 skipped — module_type=ams
+2026-09-28 23:52:08,609 DEBUG [backend.app.services.print_scheduler] [-] Auto-drying: printer 1 AMS 1 skipped — module_type=ams
+2026-09-28 23:52:08,609 DEBUG [backend.app.services.print_scheduler] [-] Auto-drying: printer 1 AMS 2 skipped — module_type=ams
+2026-09-28 23:52:08,610 DEBUG [backend.app.services.print_scheduler] [-] Auto-drying: printer 2 — checking 3 AMS units
+2026-09-28 23:52:08,610 DEBUG [backend.app.services.print_scheduler] [-] Auto-drying: printer 2 AMS 0 skipped — module_type=ams
+2026-09-28 23:52:08,610 DEBUG [backend.app.services.print_scheduler] [-] Auto-drying: printer 2 AMS 1 skipped — module_type=ams
+2026-09-28 23:52:08,610 DEBUG [backend.app.services.print_scheduler] [-] Auto-drying: printer 2 AMS 2 skipped — module_type=ams
+2026-09-28 23:52:08,610 DEBUG [backend.app.services.print_scheduler] [-] Auto-drying: printer 3 — checking 3 AMS units
+2026-09-28 23:52:08,610 DEBUG [backend.app.services.print_scheduler] [-] Auto-drying: printer 3 AMS 0 skipped — module_type=ams
+2026-09-28 23:52:08,611 DEBUG [backend.app.services.print_scheduler] [-] Auto-drying: printer 3 AMS 1 skipped — module_type=ams
+2026-09-28 23:52:08,611 DEBUG [backend.app.services.print_scheduler] [-] Auto-drying: printer 3 AMS 2 skipped — module_type=ams
+2026-09-28 23:52:08,762 INFO [uvicorn.access] [-] [IP]:42426 - "POST /api/v1/spoolbuddy/scale/reading HTTP/1.1" 200
+2026-09-28 23:52:08,792 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Found xcam inside print data: {'allow_skip_parts': False, 'buildplate_marker_detector': True, 'first_layer_inspector': True, 'halt_print_sensitivity': 'medium', 'print_halt': True, 'printing_monitor': True, 'spaghetti_detector': True}
+2026-09-28 23:52:08,803 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Parsing xcam data - all fields: ['allow_skip_parts', 'buildplate_marker_detector', 'first_layer_inspector', 'halt_print_sensitivity', 'print_halt', 'printing_monitor', 'spaghetti_detector']
+2026-09-28 23:52:08,810 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received gcode_state: RUNNING, gcode_file: /data/Metadata/plate_1.gcode, subtask_name: Supersquared_7_Caps_and_7_Wheels_-_Smoke_PETG_-_Foopie
+2026-09-28 23:52:08,814 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] ams_extruder_map: {'0': 0, '1': 0, '2': 0}
+2026-09-28 23:52:08,817 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received command response: push_status
+2026-09-28 23:52:08,818 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper raw value: 40.0
+2026-09-28 23:52:08,823 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper direct value: 40.0°C (heater OFF)
+2026-09-28 23:52:08,824 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] HMS data received: [{'attr': 117469184, 'code': 131077}]
+2026-09-28 23:52:08,825 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] lights_report: [{'mode': 'on', 'node': 'chamber_light'}, {'mode': 'flashing', 'node': 'work_light'}]
+2026-09-28 23:52:08,826 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] gcode_state: RUNNING -> RUNNING, file: /data/Metadata/plate_1.gcode, subtask: Supersquared_7_Caps_and_7_Wheels_-_Smoke_PETG_-_Foopie
+2026-09-28 23:52:08,893 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Found xcam inside print data: {'allow_skip_parts': False, 'buildplate_marker_detector': True, 'first_layer_inspector': True, 'halt_print_sensitivity': 'medium', 'print_halt': True, 'printing_monitor': True, 'spaghetti_detector': True}
+2026-09-28 23:52:08,894 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Parsing xcam data - all fields: ['allow_skip_parts', 'buildplate_marker_detector', 'first_layer_inspector', 'halt_print_sensitivity', 'print_halt', 'printing_monitor', 'spaghetti_detector']
+2026-09-28 23:52:08,894 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received gcode_state: RUNNING, gcode_file: /data/Metadata/plate_1.gcode, subtask_name: NFC_16_Rear_Frames_-_Matte_Charcoal_-_Magi_-_Carbon_Fiber
+2026-09-28 23:52:08,896 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] ams_extruder_map: {'0': 0, '1': 0, '2': 0}
+2026-09-28 23:52:08,904 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received command response: push_status
+2026-09-28 23:52:08,908 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper raw value: 38.0
+2026-09-28 23:52:08,909 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper direct value: 38.0°C (heater OFF)
+2026-09-28 23:52:08,911 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] HMS data received: []
+2026-09-28 23:52:08,912 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] lights_report: [{'mode': 'on', 'node': 'chamber_light'}, {'mode': 'flashing', 'node': 'work_light'}]
+2026-09-28 23:52:08,914 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] gcode_state: RUNNING -> RUNNING, file: /data/Metadata/plate_1.gcode, subtask: NFC_16_Rear_Frames_-_Matte_Charcoal_-_Magi_-_Carbon_Fiber
+2026-09-28 23:52:09,349 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Found xcam inside print data: {'allow_skip_parts': False, 'buildplate_marker_detector': True, 'first_layer_inspector': True, 'halt_print_sensitivity': 'medium', 'print_halt': True, 'printing_monitor': True, 'spaghetti_detector': True}
+2026-09-28 23:52:09,349 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Parsing xcam data - all fields: ['allow_skip_parts', 'buildplate_marker_detector', 'first_layer_inspector', 'halt_print_sensitivity', 'print_halt', 'printing_monitor', 'spaghetti_detector']
+2026-09-28 23:52:09,350 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received gcode_state: RUNNING, gcode_file: /data/Metadata/plate_1.gcode, subtask_name: NFC_16_Front_Frames_-_Charcoal_Mistletoe_-_Quadrahedron_-_Carbon_Fiber
+2026-09-28 23:52:09,351 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] ams_extruder_map: {'0': 0, '1': 0, '2': 0}
+2026-09-28 23:52:09,352 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received command response: push_status
+2026-09-28 23:52:09,353 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper raw value: 40.0
+2026-09-28 23:52:09,353 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper direct value: 40.0°C (heater OFF)
+2026-09-28 23:52:09,354 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] HMS data received: []
+2026-09-28 23:52:09,354 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] lights_report: [{'mode': 'on', 'node': 'chamber_light'}, {'mode': 'flashing', 'node': 'work_light'}]
+2026-09-28 23:52:09,355 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] gcode_state: RUNNING -> RUNNING, file: /data/Metadata/plate_1.gcode, subtask: NFC_16_Front_Frames_-_Charcoal_Mistletoe_-_Quadrahedron_-_Carbon_Fiber
+2026-09-28 23:52:09,771 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Found xcam inside print data: {'allow_skip_parts': False, 'buildplate_marker_detector': True, 'first_layer_inspector': True, 'halt_print_sensitivity': 'medium', 'print_halt': True, 'printing_monitor': True, 'spaghetti_detector': True}
+2026-09-28 23:52:09,774 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Parsing xcam data - all fields: ['allow_skip_parts', 'buildplate_marker_detector', 'first_layer_inspector', 'halt_print_sensitivity', 'print_halt', 'printing_monitor', 'spaghetti_detector']
+2026-09-28 23:52:09,774 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received gcode_state: RUNNING, gcode_file: /data/Metadata/plate_1.gcode, subtask_name: Supersquared_7_Caps_and_7_Wheels_-_Smoke_PETG_-_Foopie
+2026-09-28 23:52:09,776 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] ams_extruder_map: {'0': 0, '1': 0, '2': 0}
+2026-09-28 23:52:09,777 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received command response: push_status
+2026-09-28 23:52:09,778 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper raw value: 40.0
+2026-09-28 23:52:09,779 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper direct value: 40.0°C (heater OFF)
+2026-09-28 23:52:09,781 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] HMS data received: [{'attr': 117469184, 'code': 131077}]
+2026-09-28 23:52:09,782 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] lights_report: [{'mode': 'on', 'node': 'chamber_light'}, {'mode': 'flashing', 'node': 'work_light'}]
+2026-09-28 23:52:09,783 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] gcode_state: RUNNING -> RUNNING, file: /data/Metadata/plate_1.gcode, subtask: Supersquared_7_Caps_and_7_Wheels_-_Smoke_PETG_-_Foopie
+2026-09-28 23:52:09,943 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Found xcam inside print data: {'allow_skip_parts': False, 'buildplate_marker_detector': True, 'first_layer_inspector': True, 'halt_print_sensitivity': 'medium', 'print_halt': True, 'printing_monitor': True, 'spaghetti_detector': True}
+2026-09-28 23:52:09,944 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Parsing xcam data - all fields: ['allow_skip_parts', 'buildplate_marker_detector', 'first_layer_inspector', 'halt_print_sensitivity', 'print_halt', 'printing_monitor', 'spaghetti_detector']
+2026-09-28 23:52:09,945 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received gcode_state: RUNNING, gcode_file: /data/Metadata/plate_1.gcode, subtask_name: NFC_16_Rear_Frames_-_Matte_Charcoal_-_Magi_-_Carbon_Fiber
+2026-09-28 23:52:09,947 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] ams_extruder_map: {'0': 0, '1': 0, '2': 0}
+2026-09-28 23:52:09,949 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received command response: push_status
+2026-09-28 23:52:09,956 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper raw value: 38.0
+2026-09-28 23:52:09,957 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper direct value: 38.0°C (heater OFF)
+2026-09-28 23:52:09,958 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] HMS data received: []
+2026-09-28 23:52:09,963 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] lights_report: [{'mode': 'on', 'node': 'chamber_light'}, {'mode': 'flashing', 'node': 'work_light'}]
+2026-09-28 23:52:09,964 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] gcode_state: RUNNING -> RUNNING, file: /data/Metadata/plate_1.gcode, subtask: NFC_16_Rear_Frames_-_Matte_Charcoal_-_Magi_-_Carbon_Fiber
+2026-09-28 23:52:10,055 INFO [uvicorn.access] [-] [IP]:42480 - "POST /api/v1/spoolbuddy/scale/reading HTTP/1.1" 200
+2026-09-28 23:52:10,349 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Found xcam inside print data: {'allow_skip_parts': False, 'buildplate_marker_detector': True, 'first_layer_inspector': True, 'halt_print_sensitivity': 'medium', 'print_halt': True, 'printing_monitor': True, 'spaghetti_detector': True}
+2026-09-28 23:52:10,350 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Parsing xcam data - all fields: ['allow_skip_parts', 'buildplate_marker_detector', 'first_layer_inspector', 'halt_print_sensitivity', 'print_halt', 'printing_monitor', 'spaghetti_detector']
+2026-09-28 23:52:10,352 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received gcode_state: RUNNING, gcode_file: /data/Metadata/plate_1.gcode, subtask_name: NFC_16_Front_Frames_-_Charcoal_Mistletoe_-_Quadrahedron_-_Carbon_Fiber
+2026-09-28 23:52:10,353 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] ams_extruder_map: {'0': 0, '1': 0, '2': 0}
+2026-09-28 23:52:10,354 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received command response: push_status
+2026-09-28 23:52:10,355 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper raw value: 40.0
+2026-09-28 23:52:10,356 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper direct value: 40.0°C (heater OFF)
+2026-09-28 23:52:10,357 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] HMS data received: []
+2026-09-28 23:52:10,358 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] lights_report: [{'mode': 'on', 'node': 'chamber_light'}, {'mode': 'flashing', 'node': 'work_light'}]
+2026-09-28 23:52:10,359 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] gcode_state: RUNNING -> RUNNING, file: /data/Metadata/plate_1.gcode, subtask: NFC_16_Front_Frames_-_Charcoal_Mistletoe_-_Quadrahedron_-_Carbon_Fiber
