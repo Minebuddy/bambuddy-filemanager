@@ -1,0 +1,200 @@
+2026-10-02 16:05:22,636 INFO [backend.app.services.virtual_printer.ssdp_server] [-] Stopping SSDP server
+2026-10-02 16:05:22,636 INFO [backend.app.services.virtual_printer.ftp_server] [-] Stopping FTP server
+2026-10-02 16:05:22,636 INFO [backend.app.services.virtual_printer.mqtt_server] [-] Stopping simple MQTT server
+2026-10-02 16:05:22,636 INFO [backend.app.services.virtual_printer.tcp_proxy] [-] Stopping Camera-6000 proxy
+2026-10-02 16:05:22,636 INFO [backend.app.services.virtual_printer.bind_server] [-] Stopping bind server
+2026-10-02 16:05:22,637 INFO [backend.app.services.virtual_printer.manager] [-] Removed VP instance: Blue Queue
+2026-10-02 16:05:22,637 INFO [backend.app.services.virtual_printer.mqtt_bridge] [-] [Green Queue] MQTT bridge unbound from printer 2
+2026-10-02 16:05:22,637 INFO [backend.app.services.virtual_printer.tcp_proxy] [-] Stopping Camera-6000 proxy
+2026-10-02 16:05:22,637 INFO [backend.app.services.virtual_printer.ftp_server] [-] Stopping FTP server
+2026-10-02 16:05:22,637 INFO [backend.app.services.virtual_printer.mqtt_server] [-] Stopping simple MQTT server
+2026-10-02 16:05:22,637 INFO [backend.app.services.virtual_printer.mqtt_server] [-] Periodic status push task stopped
+2026-10-02 16:05:22,637 INFO [backend.app.services.virtual_printer.bind_server] [-] Stopping bind server
+2026-10-02 16:05:22,637 INFO [backend.app.services.virtual_printer.ssdp_server] [-] Stopping SSDP server
+2026-10-02 16:05:22,637 INFO [backend.app.services.virtual_printer.ftp_server] [-] Stopping FTP server
+2026-10-02 16:05:22,637 INFO [backend.app.services.virtual_printer.mqtt_server] [-] Stopping simple MQTT server
+2026-10-02 16:05:22,637 INFO [backend.app.services.virtual_printer.tcp_proxy] [-] Stopping Camera-6000 proxy
+2026-10-02 16:05:22,637 INFO [backend.app.services.virtual_printer.bind_server] [-] Stopping bind server
+2026-10-02 16:05:22,637 INFO [backend.app.services.virtual_printer.manager] [-] Removed VP instance: Green Queue
+2026-10-02 16:05:22,637 INFO [backend.app.services.virtual_printer.manager] [-] All virtual printer services stopped
+2026-10-02 16:05:22,650 INFO [root] [-] WAL checkpoint completed
+2026-10-02 16:05:30,075 INFO [root] [-] Logging to file: /opt/[user]/logs/bambuddy.log
+2026-10-02 16:05:30,076 INFO [root] [-] Bambuddy starting - debug=False, log_level=INFO
+2026-10-02 16:05:30,705 WARNING [backend.app.core.asyncio_handlers] [-] Running on uvloop, which Bambuddy is not tested or shipped on. Virtual Printer FTP uploads can be silently truncated on this loop (#1896). Add '--loop asyncio' to the uvicorn command in your service file and restart. Every installer Bambuddy ships already does this; a unit written by a third-party script, or one created before 2026-07-05, will not, and updating does not add it.
+2026-10-02 16:05:31,280 INFO [backend.app.services.mqtt_relay] [-] MQTT relay disabled
+2026-10-02 16:05:32,069 WARNING [backend.app.services.bambu_mqtt] [-] [[SERIAL]] MQTT disconnected: rc=Unspecified error, flags=DisconnectFlags(is_disconnect_packet_from_server=False)
+2026-10-02 16:05:32,069 INFO [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Disconnected shortly after request topic subscription (1/2). Retrying it on the next connection before giving up.
+2026-10-02 16:05:32,069 INFO [backend.app.main] [-] [#1752] Printer 1 connected→disconnected edge; scheduling offline notification in 60s
+2026-10-02 16:05:32,072 WARNING [backend.app.services.bambu_mqtt] [-] [[SERIAL]] MQTT disconnected: rc=Unspecified error, flags=DisconnectFlags(is_disconnect_packet_from_server=False)
+2026-10-02 16:05:32,072 INFO [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Disconnected shortly after request topic subscription (1/2). Retrying it on the next connection before giving up.
+2026-10-02 16:05:32,073 INFO [backend.app.main] [-] [#1752] Printer 2 connected→disconnected edge; scheduling offline notification in 60s
+2026-10-02 16:05:32,292 INFO [backend.app.services.smart_plug_manager] [-] Smart plug scheduler started
+2026-10-02 16:05:32,292 INFO [backend.app.services.smart_plug_manager] [-] Smart plug energy snapshot loop started
+2026-10-02 16:05:32,292 INFO [backend.app.services.ha_sensor_manager] [-] Home Assistant sensor poller started
+2026-10-02 16:05:32,292 INFO [backend.app.services.location_ha_sensor_manager] [-] Home Assistant location-sensor poller started
+2026-10-02 16:05:32,294 INFO [backend.app.services.print_scheduler] [-] Print scheduler started
+2026-10-02 16:05:32,297 INFO [backend.app.services.notification_service] [-] Notification digest scheduler started
+2026-10-02 16:05:32,297 INFO [backend.app.services.github_backup] [-] Starting GitHub backup scheduler
+2026-10-02 16:05:32,297 INFO [backend.app.services.local_backup] [-] Starting local backup scheduler
+2026-10-02 16:05:32,299 INFO [backend.app.services.obico_detection] [-] Starting Obico detection service
+2026-10-02 16:05:32,299 INFO [backend.app.services.library_trash] [-] Starting library trash sweeper
+2026-10-02 16:05:32,299 INFO [backend.app.services.archive_purge] [-] Starting archive auto-purge sweeper
+2026-10-02 16:05:32,300 INFO [backend.app.main] [-] AMS history recording started
+2026-10-02 16:05:32,300 INFO [backend.app.main] [-] Printer sensor history recording started
+2026-10-02 16:05:32,300 INFO [backend.app.main] [-] Printer runtime tracking started
+2026-10-02 16:05:32,300 INFO [backend.app.main] [-] SpoolBuddy watchdog started
+2026-10-02 16:05:32,300 INFO [backend.app.main] [-] Camera stream cleanup started
+2026-10-02 16:05:32,300 INFO [backend.app.main] [-] Printer connection watchdog started
+2026-10-02 16:05:32,367 INFO [backend.app.main] [-] Expected prints cleanup started
+2026-10-02 16:05:32,368 INFO [backend.app.main] [-] Auth periodic cleanup started
+2026-10-02 16:05:32,368 INFO [backend.app.services.loop_watchdog] [-] Event-loop stall watchdog started — dumps all thread stacks to stderr if the loop stalls for more than 30s
+2026-10-02 16:05:32,382 INFO [backend.app.services.virtual_printer.manager] [-] [VP Blue Queue] Starting server-mode services on [IP]
+2026-10-02 16:05:32,382 INFO [backend.app.services.virtual_printer.certificate] [-] Deleted printer certificate (CA preserved)
+2026-10-02 16:05:32,382 INFO [backend.app.services.virtual_printer.certificate] [-] Generating certificates for virtual printer (serial: [SERIAL])...
+2026-10-02 16:05:32,413 INFO [backend.app.services.virtual_printer.certificate] [-] Using existing CA certificate (expires in 7164 days)
+2026-10-02 16:05:32,422 INFO [backend.app.services.virtual_printer.certificate] [-] Generating printer certificate with CN=[SERIAL], local IP: [IP]
+2026-10-02 16:05:32,423 INFO [backend.app.services.virtual_printer.certificate] [-] Added additional SAN IP: [IP]
+2026-10-02 16:05:32,424 INFO [backend.app.services.virtual_printer.certificate] [-] Generated certificate chain at /opt/[user]/data/virtual_printer/certs/1
+2026-10-02 16:05:32,424 INFO [backend.app.services.virtual_printer.certificate] [-]   CA: CN=Virtual Printer CA
+2026-10-02 16:05:32,424 INFO [backend.app.services.virtual_printer.certificate] [-]   Printer: CN=[SERIAL]
+2026-10-02 16:05:32,424 INFO [backend.app.services.virtual_printer.mqtt_bridge] [-] [Blue Queue] MQTT bridge IP encoding armed: target=[IP] vp=[IP] (bind_address)
+2026-10-02 16:05:32,424 INFO [backend.app.services.virtual_printer.mqtt_bridge] [-] [Blue Queue] MQTT bridge bound to printer 1 (serial=[SERIAL])
+2026-10-02 16:05:32,424 INFO [backend.app.services.virtual_printer.ftp_server] [-] [Blue Queue] Starting virtual printer implicit FTPS on [IP]:990
+2026-10-02 16:05:32,425 INFO [backend.app.services.virtual_printer.ftp_server] [-] FTP SSL context created with standard settings
+2026-10-02 16:05:32,425 INFO [backend.app.services.virtual_printer.mqtt_server] [-] Starting simple MQTT server on port 8883
+2026-10-02 16:05:32,432 INFO [backend.app.services.virtual_printer.mqtt_server] [-] MQTT SSL cert info: subject=CN=[SERIAL]
+issuer=CN=Virtual Printer CA
+2026-10-02 16:05:32,432 INFO [backend.app.services.virtual_printer.mqtt_server] [-] MQTT SSL context: TLS 1.2+, cert=/opt/[user]/data/virtual_printer/certs/1/virtual_printer.crt
+2026-10-02 16:05:32,432 INFO [backend.app.services.virtual_printer.tcp_proxy] [-] Starting Camera-6000 TCP proxy: [IP]:6000 → [IP]:6000
+2026-10-02 16:05:32,432 INFO [backend.app.services.virtual_printer.bind_server] [-] Starting bind server on ports [3000, 3002] (serial=[SERIAL], model=C12, tls=True)
+2026-10-02 16:05:32,432 INFO [backend.app.services.virtual_printer.ssdp_server] [-] Starting virtual printer SSDP server: Blue Queue ([SERIAL])
+2026-10-02 16:05:32,433 INFO [backend.app.services.virtual_printer.ssdp_server] [-] SSDP server listening on port 2021, advertising IP: [IP]
+2026-10-02 16:05:32,433 INFO [backend.app.services.virtual_printer.ssdp_server] [-] Virtual printer: Blue Queue ([SERIAL]) model=C12
+2026-10-02 16:05:32,433 INFO [backend.app.services.virtual_printer.ssdp_server] [-] SSDP server also listening on [IP]:2021
+2026-10-02 16:05:32,433 INFO [backend.app.services.virtual_printer.ssdp_server] [-] Sent initial SSDP NOTIFY announcement
+2026-10-02 16:05:32,433 INFO [backend.app.services.virtual_printer.ftp_server] [-] Implicit FTPS server started on port 990
+2026-10-02 16:05:32,434 INFO [backend.app.services.virtual_printer.ftp_server] [-] FTP passive data port range: 50000-50009
+2026-10-02 16:05:32,434 INFO [backend.app.services.virtual_printer.mqtt_server] [-] Simple MQTT server listening on port 8883
+2026-10-02 16:05:32,434 INFO [backend.app.services.virtual_printer.tcp_proxy] [-] Camera-6000 TCP proxy listening on port 6000
+2026-10-02 16:05:32,434 INFO [backend.app.services.virtual_printer.bind_server] [-] Bind server listening on [IP]:3000 (plain)
+2026-10-02 16:05:32,434 INFO [backend.app.services.virtual_printer.mqtt_server] [-] Starting periodic status push task
+2026-10-02 16:05:32,434 INFO [backend.app.services.virtual_printer.bind_server] [-] Bind server listening on [IP]:3002 (TLS)
+2026-10-02 16:05:32,435 INFO [backend.app.services.virtual_printer.manager] [-] [VP Blue Queue] Server-mode services started on [IP]
+2026-10-02 16:05:32,435 INFO [backend.app.services.virtual_printer.manager] [-] Started server-mode VP: Blue Queue on [IP]
+2026-10-02 16:05:32,435 INFO [backend.app.services.virtual_printer.manager] [-] [VP Green Queue] Starting server-mode services on [IP]
+2026-10-02 16:05:32,435 INFO [backend.app.services.virtual_printer.certificate] [-] Deleted printer certificate (CA preserved)
+2026-10-02 16:05:32,435 INFO [backend.app.services.virtual_printer.certificate] [-] Generating certificates for virtual printer (serial: [SERIAL])...
+2026-10-02 16:05:32,466 INFO [backend.app.services.virtual_printer.certificate] [-] Using existing CA certificate (expires in 7164 days)
+2026-10-02 16:05:32,499 INFO [backend.app.services.virtual_printer.certificate] [-] Generating printer certificate with CN=[SERIAL], local IP: [IP]
+2026-10-02 16:05:32,499 INFO [backend.app.services.virtual_printer.certificate] [-] Added additional SAN IP: [IP]
+2026-10-02 16:05:32,500 INFO [backend.app.services.virtual_printer.certificate] [-] Generated certificate chain at /opt/[user]/data/virtual_printer/certs/2
+2026-10-02 16:05:32,500 INFO [backend.app.services.virtual_printer.certificate] [-]   CA: CN=Virtual Printer CA
+2026-10-02 16:05:32,500 INFO [backend.app.services.virtual_printer.certificate] [-]   Printer: CN=[SERIAL]
+2026-10-02 16:05:32,500 INFO [backend.app.services.virtual_printer.mqtt_bridge] [-] [Green Queue] MQTT bridge IP encoding armed: target=[IP] vp=[IP] (bind_address)
+2026-10-02 16:05:32,500 INFO [backend.app.services.virtual_printer.mqtt_bridge] [-] [Green Queue] MQTT bridge bound to printer 2 (serial=[SERIAL])
+2026-10-02 16:05:32,501 INFO [backend.app.services.virtual_printer.ftp_server] [-] [Green Queue] Starting virtual printer implicit FTPS on [IP]:990
+2026-10-02 16:05:32,501 INFO [backend.app.services.virtual_printer.ftp_server] [-] FTP SSL context created with standard settings
+2026-10-02 16:05:32,501 INFO [backend.app.services.virtual_printer.mqtt_server] [-] Starting simple MQTT server on port 8883
+2026-10-02 16:05:32,507 INFO [backend.app.services.virtual_printer.mqtt_server] [-] MQTT SSL cert info: subject=CN=[SERIAL]
+issuer=CN=Virtual Printer CA
+2026-10-02 16:05:32,508 INFO [backend.app.services.virtual_printer.mqtt_server] [-] MQTT SSL context: TLS 1.2+, cert=/opt/[user]/data/virtual_printer/certs/2/virtual_printer.crt
+2026-10-02 16:05:32,508 INFO [backend.app.services.virtual_printer.tcp_proxy] [-] Starting Camera-6000 TCP proxy: [IP]:6000 → [IP]:6000
+2026-10-02 16:05:32,508 INFO [backend.app.services.virtual_printer.bind_server] [-] Starting bind server on ports [3000, 3002] (serial=[SERIAL], model=C12, tls=True)
+2026-10-02 16:05:32,508 INFO [backend.app.services.virtual_printer.ssdp_server] [-] Starting virtual printer SSDP server: Green Queue ([SERIAL])
+2026-10-02 16:05:32,508 INFO [backend.app.services.virtual_printer.ssdp_server] [-] SSDP server listening on port 2021, advertising IP: [IP]
+2026-10-02 16:05:32,508 INFO [backend.app.services.virtual_printer.ssdp_server] [-] Virtual printer: Green Queue ([SERIAL]) model=C12
+2026-10-02 16:05:32,508 INFO [backend.app.services.virtual_printer.ssdp_server] [-] SSDP server also listening on [IP]:2021
+2026-10-02 16:05:32,508 INFO [backend.app.services.virtual_printer.ssdp_server] [-] Sent initial SSDP NOTIFY announcement
+2026-10-02 16:05:32,509 INFO [backend.app.services.virtual_printer.ftp_server] [-] Implicit FTPS server started on port 990
+2026-10-02 16:05:32,509 INFO [backend.app.services.virtual_printer.ftp_server] [-] FTP passive data port range: 50010-50019
+2026-10-02 16:05:32,509 INFO [backend.app.services.virtual_printer.mqtt_server] [-] Simple MQTT server listening on port 8883
+2026-10-02 16:05:32,509 INFO [backend.app.services.virtual_printer.tcp_proxy] [-] Camera-6000 TCP proxy listening on port 6000
+2026-10-02 16:05:32,509 INFO [backend.app.services.virtual_printer.bind_server] [-] Bind server listening on [IP]:3000 (plain)
+2026-10-02 16:05:32,509 INFO [backend.app.services.virtual_printer.mqtt_server] [-] Starting periodic status push task
+2026-10-02 16:05:32,509 INFO [backend.app.services.virtual_printer.bind_server] [-] Bind server listening on [IP]:3002 (TLS)
+2026-10-02 16:05:32,511 INFO [backend.app.services.virtual_printer.manager] [-] [VP Green Queue] Server-mode services started on [IP]
+2026-10-02 16:05:32,511 INFO [backend.app.services.virtual_printer.manager] [-] Started server-mode VP: Green Queue on [IP]
+2026-10-02 16:05:32,511 INFO [root] [-] Virtual printer manager synced from database
+2026-10-02 16:05:33,840 INFO [backend.app.main] [-] [#1752] Printer 1 reconnected before debounce; cancelling pending offline notification
+2026-10-02 16:05:33,855 WARNING [backend.app.services.bambu_mqtt] [-] [[SERIAL]] MQTT disconnected: rc=Unspecified error, flags=DisconnectFlags(is_disconnect_packet_from_server=False)
+2026-10-02 16:05:33,855 WARNING [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Disconnected shortly after request topic subscription 2 times. Disabling request topic for this printer — ams_mapping capture from slicer-initiated prints is unavailable, and their filament will be attributed from the printer's own tray reporting instead.
+2026-10-02 16:05:33,855 INFO [backend.app.main] [-] [#1752] Printer 1 connected→disconnected edge; scheduling offline notification in 60s
+2026-10-02 16:05:33,857 INFO [backend.app.main] [-] [#1752] Printer 2 reconnected before debounce; cancelling pending offline notification
+2026-10-02 16:05:33,872 WARNING [backend.app.services.bambu_mqtt] [-] [[SERIAL]] MQTT disconnected: rc=Unspecified error, flags=DisconnectFlags(is_disconnect_packet_from_server=False)
+2026-10-02 16:05:33,872 WARNING [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Disconnected shortly after request topic subscription 2 times. Disabling request topic for this printer — ams_mapping capture from slicer-initiated prints is unavailable, and their filament will be attributed from the printer's own tray reporting instead.
+2026-10-02 16:05:33,872 INFO [backend.app.main] [-] [#1752] Printer 2 connected→disconnected edge; scheduling offline notification in 60s
+2026-10-02 16:05:34,709 INFO [uvicorn.access] [-] [IP]:0 - "POST /api/v1/auth/ws-token HTTP/1.1" 200
+2026-10-02 16:05:34,718 INFO [backend.app.api.routes.websocket] [-] WebSocket client connecting (principal=[USER])
+2026-10-02 16:05:34,719 INFO [backend.app.api.routes.websocket] [-] WebSocket client connected
+2026-10-02 16:05:34,719 INFO [backend.app.api.routes.websocket] [-] Sent initial status for 2 printers
+2026-10-02 16:05:35,641 INFO [backend.app.main] [-] [#1752] Printer 1 reconnected before debounce; cancelling pending offline notification
+2026-10-02 16:05:35,641 INFO [backend.app.main] [-] [#1752] Printer 2 reconnected before debounce; cancelling pending offline notification
+2026-10-02 16:05:35,723 INFO [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Unnamed print stage 255 on model P1S, entered from -1 (Unknown stage (-1)); state=FINISH progress=100.0% layer=481/481
+2026-10-02 16:05:35,723 INFO [backend.app.services.bambu_mqtt] [-] [[SERIAL]] State is FINISH but completion NOT triggered: prev=None, was_running=False, already_triggered=False, has_callback=True
+2026-10-02 16:05:35,735 INFO [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Unnamed print stage 255 on model P1S, entered from -1 (Unknown stage (-1)); state=FINISH progress=100.0% layer=1594/1594
+2026-10-02 16:05:35,735 INFO [backend.app.services.bambu_mqtt] [-] [[SERIAL]] State is FINISH but completion NOT triggered: prev=None, was_running=False, already_triggered=False, has_callback=True
+2026-10-02 16:05:35,735 INFO [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Firmware version: 01.10.00.00
+2026-10-02 16:05:35,736 INFO [backend.app.main] [-] [Printer 2] Broadcasting AMS change via WebSocket
+2026-10-02 16:05:35,737 INFO [backend.app.main] [-] [Printer 2] Broadcasting AMS change via WebSocket
+2026-10-02 16:05:35,738 INFO [backend.app.main] [-] [Printer 1] Broadcasting AMS change via WebSocket
+2026-10-02 16:05:35,738 INFO [backend.app.main] [-] [Printer 1] Broadcasting AMS change via WebSocket
+2026-10-02 16:05:35,740 INFO [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Requesting K-profiles for nozzle_diameter=0.4 (attempt 1/2, seq_id=7)
+2026-10-02 16:05:35,741 INFO [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Requesting K-profiles for nozzle_diameter=0.4 (attempt 1/2, seq_id=7)
+2026-10-02 16:05:35,745 INFO [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Firmware version: 01.10.00.00
+2026-10-02 16:05:35,760 INFO [backend.app.services.bambu_mqtt] [-] [[SERIAL]] K-profile response: nozzle=0.4, seq_id=2, 0 profiles, matched=True
+2026-10-02 16:05:35,761 INFO [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Got 0 K-profiles for nozzle=0.4
+2026-10-02 16:05:35,761 INFO [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Got 0 K-profiles for nozzle=0.4 on attempt 1
+2026-10-02 16:05:35,761 INFO [backend.app.main] [-] [Printer 1] Primed K-profile table for nozzle 0.4: 0 profiles
+2026-10-02 16:05:35,763 INFO [backend.app.services.bambu_mqtt] [-] [[SERIAL]] K-profile response: nozzle=0.4, seq_id=6, 0 profiles, matched=True
+2026-10-02 16:05:35,764 INFO [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Got 0 K-profiles for nozzle=0.4
+2026-10-02 16:05:35,764 INFO [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Got 0 K-profiles for nozzle=0.4 on attempt 1
+2026-10-02 16:05:35,764 INFO [backend.app.main] [-] [Printer 2] Primed K-profile table for nozzle 0.4: 0 profiles
+2026-10-02 16:05:41,076 INFO [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Probing developer mode via ams_filament_setting (seq=8)
+2026-10-02 16:05:41,097 INFO [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Developer mode probe: ENABLED (result='success')
+2026-10-02 16:05:42,376 INFO [backend.app.main] [-] Recorded 4 AMS sensor history entries
+2026-10-02 16:05:45,016 INFO [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Probing developer mode via ams_filament_setting (seq=8)
+2026-10-02 16:05:45,083 INFO [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Developer mode probe: ENABLED (result='success')
+2026-10-02 16:06:02,308 INFO [backend.app.services.smart_plug_manager] [-] Captured 1 energy snapshot(s)
+2026-10-02 16:06:28,039 INFO [backend.app.services.camera] [df32c931] Found ffmpeg at: /usr/bin/ffmpeg
+2026-10-02 16:07:53,903 INFO [backend.app.api.routes.support] [b28d8883] Log level changed to DEBUG
+2026-10-02 16:07:53,903 INFO [backend.app.api.routes.bug_report] [b28d8883] Bug report: enabled debug logging
+2026-10-02 16:07:53,903 DEBUG [backend.app.services.bambu_mqtt] [b28d8883] [[SERIAL]] Requesting status update (pushall)
+2026-10-02 16:07:53,904 DEBUG [backend.app.services.bambu_mqtt] [b28d8883] [[SERIAL]] Requesting status update (pushall)
+2026-10-02 16:07:53,904 INFO [uvicorn.access] [-] [IP]:0 - "POST /api/v1/bug-report/start-logging HTTP/1.1" 200
+2026-10-02 16:07:54,132 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received gcode_state: FINISH, gcode_file: , subtask_name: Halloween_Skull_Tea_Light_Candle_Holders
+2026-10-02 16:07:54,132 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] AMS dict fields: {'ams_exist_bits': '3', 'tray_exist_bits': 'ff', 'tray_is_bbl_bits': 'ff', 'tray_tar': '255', 'tray_now': '255', 'tray_pre': '255', 'tray_read_done_bits': 'ff', 'tray_reading_bits': '0', 'version': 51, 'insert_flag': True, 'power_on_flag': False}
+2026-10-02 16:07:54,132 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] tray_now updated: 255
+2026-10-02 16:07:54,132 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Merged AMS data: 2 new units, 2 total
+2026-10-02 16:07:54,132 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] AMS 0 info=0x2003 -> extruder 0
+2026-10-02 16:07:54,132 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] AMS 1 info=0x2003 -> extruder 0
+2026-10-02 16:07:54,133 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] ams_extruder_map: {'0': 0, '1': 0}
+2026-10-02 16:07:54,133 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] ams_status: 0 (main=0, sub=0)
+2026-10-02 16:07:54,133 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received command response: push_status
+2026-10-02 16:07:54,133 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper raw value: 5.0
+2026-10-02 16:07:54,133 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper direct value: 5.0°C (heater OFF)
+2026-10-02 16:07:54,133 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Chamber heating calculated: target=0.0, current=5.0, heating=False, respect_local=False
+2026-10-02 16:07:54,133 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Chamber temp updated to: 5.0, target: 0.0, heating: False
+2026-10-02 16:07:54,133 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] HMS data received: []
+2026-10-02 16:07:54,133 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] ipcam field: {'ipcam_dev': '1', 'ipcam_record': 'enable', 'timelapse': 'disable', 'resolution': '', 'tutk_server': 'disable', 'mode_bits': 3}
+2026-10-02 16:07:54,133 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] wifi_signal received: -42dBm
+2026-10-02 16:07:54,133 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] lights_report: [{'node': 'chamber_light', 'mode': 'off'}]
+2026-10-02 16:07:54,133 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] gcode_state: FINISH -> FINISH, file: , subtask: Halloween_Skull_Tea_Light_Candle_Holders
+2026-10-02 16:07:54,575 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received gcode_state: FINISH, gcode_file: , subtask_name: mela_dito_medio
+2026-10-02 16:07:54,576 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] AMS dict fields: {'ams_exist_bits': '3', 'tray_exist_bits': 'ff', 'tray_is_bbl_bits': 'ff', 'tray_tar': '255', 'tray_now': '255', 'tray_pre': '255', 'tray_read_done_bits': 'ff', 'tray_reading_bits': '0', 'version': 44, 'insert_flag': True, 'power_on_flag': False}
+2026-10-02 16:07:54,576 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] tray_now updated: 255
+2026-10-02 16:07:54,576 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Merged AMS data: 2 new units, 2 total
+2026-10-02 16:07:54,576 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] AMS 0 info=0x2003 -> extruder 0
+2026-10-02 16:07:54,576 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] AMS 1 info=0x2003 -> extruder 0
+2026-10-02 16:07:54,576 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] ams_extruder_map: {'0': 0, '1': 0}
+2026-10-02 16:07:54,576 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] ams_status: 0 (main=0, sub=0)
+2026-10-02 16:07:54,576 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received command response: push_status
+2026-10-02 16:07:54,576 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper raw value: 5.0
+2026-10-02 16:07:54,576 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] chamber_temper direct value: 5.0°C (heater OFF)
+2026-10-02 16:07:54,576 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Chamber heating calculated: target=0.0, current=5.0, heating=False, respect_local=False
+2026-10-02 16:07:54,576 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Chamber temp updated to: 5.0, target: 0.0, heating: False
+2026-10-02 16:07:54,576 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] HMS data received: []
+2026-10-02 16:07:54,576 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] ipcam field: {'ipcam_dev': '1', 'ipcam_record': 'enable', 'timelapse': 'disable', 'resolution': '', 'tutk_server': 'disable', 'mode_bits': 3}
+2026-10-02 16:07:54,576 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] wifi_signal received: -33dBm
+2026-10-02 16:07:54,576 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] lights_report: [{'node': 'chamber_light', 'mode': 'off'}]
+2026-10-02 16:07:54,576 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] gcode_state: FINISH -> FINISH, file: , subtask: mela_dito_medio
+2026-10-02 16:07:56,171 DEBUG [backend.app.services.bambu_mqtt] [-] [[SERIAL]] Received command response: push_status
