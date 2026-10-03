@@ -1149,6 +1149,8 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
     async def test_create_folder_records_authenticated_owner(self, async_client: AsyncClient, auth_setup, db_session):
         from sqlalchemy import select
 
+from backend.app.models.library import LibraryFile, LibraryFolder
+
         from backend.app.models.library import LibraryFolder
 
         response = await async_client.post(
