@@ -35,7 +35,8 @@ from backend.app.core.database import async_session, get_db
 from backend.app.core.permissions import Permission
 from backend.app.core.tasks import spawn_background_task
 from backend.app.models.archive import PrintArchive
-from backend.app.models.library import LibraryFile, LibraryFileTag, LibraryFolder
+from backend.app.models.group import Group
+from backend.app.models.library import LibraryFile, LibraryFileTag, LibraryFolder, LibraryFolderShare
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.models.project import Project
@@ -63,6 +64,10 @@ from backend.app.schemas.library import (
     FolderOwnerUpdate,
     FolderOwnerUpdateResponse,
     FolderReadmeResponse,
+    FolderSharePrincipal,
+    FolderSharePrincipalsResponse,
+    FolderShareResponse,
+    FolderShareUpsert,
     FolderResponse,
     FolderTreeItem,
     FolderUpdate,
@@ -1367,6 +1372,193 @@ async def get_folder_readme(
     content = raw.decode("utf-8", errors="replace")
 
     return FolderReadmeResponse(filename=pick.filename, content=content, truncated=truncated)
+
+
+async def _load_share_managed_folder(
+    db: AsyncSession,
+    folder_id: int,
+    current_user: User | None,
+) -> LibraryFolder:
+    """Load a folder the caller may share: owner, admin, or auth-disabled."""
+
+    result = await db.execute(select(LibraryFolder).where(LibraryFolder.id == folder_id))
+    folder = result.scalar_one_or_none()
+    if folder is None:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    if folder.is_external:
+        raise HTTPException(status_code=400, detail="External folders cannot be shared")
+    if current_user is None:
+        return folder
+    if current_user.is_admin or folder.created_by_id == current_user.id:
+        return folder
+    raise HTTPException(
+        status_code=403,
+        detail="Only the folder owner or an administrator can manage shares",
+    )
+
+
+def _folder_share_response(
+    share: LibraryFolderShare,
+    principal_name: str,
+) -> FolderShareResponse:
+    principal_type = "user" if share.user_id is not None else "group"
+    principal_id = share.user_id if share.user_id is not None else share.group_id
+    assert principal_id is not None
+    return FolderShareResponse(
+        id=share.id,
+        folder_id=share.folder_id,
+        principal_type=principal_type,
+        principal_id=principal_id,
+        principal_name=principal_name,
+        role=share.role,
+        created_at=share.created_at,
+    )
+
+
+@router.get("/folders/{folder_id}/shares", response_model=list[FolderShareResponse])
+async def list_folder_shares(
+    folder_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(
+        require_permission_if_auth_enabled(Permission.LIBRARY_SHARE)
+    ),
+):
+    """List direct shares. Inherited shares are evaluated by the access service."""
+
+    await _load_share_managed_folder(db, folder_id, current_user)
+    rows = (
+        await db.execute(
+            select(LibraryFolderShare, User.username, Group.name)
+            .outerjoin(User, LibraryFolderShare.user_id == User.id)
+            .outerjoin(Group, LibraryFolderShare.group_id == Group.id)
+            .where(LibraryFolderShare.folder_id == folder_id)
+            .order_by(LibraryFolderShare.id)
+        )
+    ).all()
+    return [
+        _folder_share_response(share, username or group_name or "Unknown")
+        for share, username, group_name in rows
+    ]
+
+
+@router.get(
+    "/folders/{folder_id}/share-principals",
+    response_model=FolderSharePrincipalsResponse,
+)
+async def list_folder_share_principals(
+    folder_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(
+        require_permission_if_auth_enabled(Permission.LIBRARY_SHARE)
+    ),
+):
+    """Return IDs/names needed by the share picker after folder authorization."""
+
+    folder = await _load_share_managed_folder(db, folder_id, current_user)
+    users = (
+        await db.execute(
+            select(User.id, User.username)
+            .where(User.is_active.is_(True))
+            .order_by(User.username)
+        )
+    ).all()
+    groups = (await db.execute(select(Group.id, Group.name).order_by(Group.name))).all()
+    return FolderSharePrincipalsResponse(
+        users=[
+            FolderSharePrincipal(id=user_id, name=username)
+            for user_id, username in users
+            if user_id != folder.created_by_id
+        ],
+        groups=[
+            FolderSharePrincipal(id=group_id, name=name)
+            for group_id, name in groups
+        ],
+    )
+
+
+@router.put("/folders/{folder_id}/shares", response_model=FolderShareResponse)
+async def upsert_folder_share(
+    folder_id: int,
+    data: FolderShareUpsert,
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(
+        require_permission_if_auth_enabled(Permission.LIBRARY_SHARE)
+    ),
+):
+    """Create or update one direct user/group grant."""
+
+    await _load_share_managed_folder(db, folder_id, current_user)
+
+    if data.principal_type == "user":
+        principal_result = await db.execute(
+            select(User).where(User.id == data.principal_id, User.is_active.is_(True))
+        )
+        principal = principal_result.scalar_one_or_none()
+        if principal is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        principal_name = principal.username
+        lookup = (
+            LibraryFolderShare.folder_id == folder_id,
+            LibraryFolderShare.user_id == data.principal_id,
+        )
+        values = {"user_id": data.principal_id, "group_id": None}
+    else:
+        principal_result = await db.execute(
+            select(Group).where(Group.id == data.principal_id)
+        )
+        principal = principal_result.scalar_one_or_none()
+        if principal is None:
+            raise HTTPException(status_code=404, detail="Group not found")
+        principal_name = principal.name
+        lookup = (
+            LibraryFolderShare.folder_id == folder_id,
+            LibraryFolderShare.group_id == data.principal_id,
+        )
+        values = {"user_id": None, "group_id": data.principal_id}
+
+    existing = (
+        await db.execute(select(LibraryFolderShare).where(*lookup))
+    ).scalar_one_or_none()
+    if existing is None:
+        existing = LibraryFolderShare(
+            folder_id=folder_id,
+            role=data.role,
+            created_by_id=current_user.id if current_user else None,
+            **values,
+        )
+        db.add(existing)
+    else:
+        existing.role = data.role
+
+    await db.commit()
+    await db.refresh(existing)
+    return _folder_share_response(existing, principal_name)
+
+
+@router.delete("/folders/{folder_id}/shares/{share_id}", status_code=204)
+async def delete_folder_share(
+    folder_id: int,
+    share_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(
+        require_permission_if_auth_enabled(Permission.LIBRARY_SHARE)
+    ),
+):
+    """Remove one direct folder share."""
+
+    await _load_share_managed_folder(db, folder_id, current_user)
+    share = (
+        await db.execute(
+            select(LibraryFolderShare).where(
+                LibraryFolderShare.id == share_id,
+                LibraryFolderShare.folder_id == folder_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if share is None:
+        raise HTTPException(status_code=404, detail="Folder share not found")
+    await db.delete(share)
+    await db.commit()
 
 
 @router.patch("/folders/{folder_id}/owner", response_model=FolderOwnerUpdateResponse)

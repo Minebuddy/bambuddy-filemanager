@@ -1,6 +1,7 @@
 """Pydantic schemas for library (File Manager) functionality."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -50,6 +51,44 @@ class FolderOwnerUpdateResponse(BaseModel):
     id: int
     created_by_id: int | None
     updated_folders: int
+
+
+FolderShareRole = Literal["viewer", "contributor", "manager"]
+FolderSharePrincipalType = Literal["user", "group"]
+
+
+class FolderShareUpsert(BaseModel):
+    """Create or update one direct folder share."""
+
+    principal_type: FolderSharePrincipalType
+    principal_id: int = Field(..., ge=1)
+    role: FolderShareRole
+
+
+class FolderShareResponse(BaseModel):
+    """One direct user/group grant attached to a folder."""
+
+    id: int
+    folder_id: int
+    principal_type: FolderSharePrincipalType
+    principal_id: int
+    principal_name: str
+    role: FolderShareRole
+    created_at: datetime
+
+
+class FolderSharePrincipal(BaseModel):
+    """Minimal principal identity exposed to an authorized folder sharer."""
+
+    id: int
+    name: str
+
+
+class FolderSharePrincipalsResponse(BaseModel):
+    """Users and groups available to an authorized folder sharer."""
+
+    users: list[FolderSharePrincipal]
+    groups: list[FolderSharePrincipal]
 
 
 class FolderResponse(BaseModel):
