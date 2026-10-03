@@ -1159,11 +1159,7 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
         assert response.status_code == 200
         folder_id = response.json()["id"]
         db_session.expire_all()
-        folder = (
-            await db_session.execute(
-                select(LibraryFolder).where(LibraryFolder.id == folder_id)
-            )
-        ).scalar_one()
+        folder = (await db_session.execute(select(LibraryFolder).where(LibraryFolder.id == folder_id))).scalar_one()
         assert folder.created_by_id == auth_setup["operator_user"]["id"]
 
     @pytest.mark.asyncio
