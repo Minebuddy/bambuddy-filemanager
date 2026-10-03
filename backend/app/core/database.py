@@ -6289,10 +6289,15 @@ async def seed_default_groups():
                     perms.append(own_perm)
                     changed = True
                     logger.info("Added %s to %s group (backfill)", own_perm, non_admin_group_name)
-            if non_admin_group_name == "Operators" and "orca_cloud:auth" not in perms:
-                perms.append("orca_cloud:auth")
-                changed = True
-                logger.info("Added orca_cloud:auth to Operators group (backfill)")
+            if non_admin_group_name == "Operators":
+                if "orca_cloud:auth" not in perms:
+                    perms.append("orca_cloud:auth")
+                    changed = True
+                    logger.info("Added orca_cloud:auth to Operators group (backfill)")
+                if "library:share" not in perms:
+                    perms.append("library:share")
+                    changed = True
+                    logger.info("Added library:share to Operators group (backfill)")
             if changed:
                 grp.permissions = perms
         await session.commit()

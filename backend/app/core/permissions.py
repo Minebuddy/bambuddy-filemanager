@@ -415,6 +415,7 @@ DEFAULT_GROUPS = {
             Permission.LIBRARY_UPLOAD.value,
             Permission.LIBRARY_UPDATE_OWN.value,
             Permission.LIBRARY_DELETE_OWN.value,
+            Permission.LIBRARY_SHARE.value,
             # MakerWorld integration
             Permission.MAKERWORLD_VIEW.value,
             Permission.MAKERWORLD_IMPORT.value,
