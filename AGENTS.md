@@ -1,0 +1,16 @@
+# Repository notes
+
+- Backend is FastAPI (`backend/app/main.py`); API routers live in `backend/app/api/routes/`, models in `backend/app/models/`, and startup schema upgrades in `backend/app/core/database.py` (`init_db` runs `create_all` then handwritten `run_migrations`). There is no Alembic migration flow.
+- Frontend entry is `frontend/src/main.tsx` → `App.tsx`; API calls are centralized in `frontend/src/api/client.ts` under `/api/v1`. Vite proxies `/api` and `/api/v1/ws` to `localhost:${BACKEND_PORT:-8000}`. `npm run build` replaces root `static/` (served by the backend); edit `frontend/src/` or `frontend/public/` instead of hand-editing tracked build output.
+- File Manager spans `frontend/src/pages/FileManagerPage.tsx`, `frontend/src/api/client.ts`, `backend/app/api/routes/library*.py`, and `backend/app/models/library.py`. Internal library paths are stored relative to the data directory; external-folder paths are absolute and gated by `BAMBUDDY_EXTERNAL_ROOTS`. Preserve the path/permission checks when changing uploads, moves, or media routes.
+
+## Local development and checks
+
+- Install backend dependencies from both `requirements.txt` and `requirements-dev.txt` (the latter pins Ruff exactly); install frontend dependencies with `cd frontend && npm ci`. CI uses Python 3.11 and Node 22. Run backend from the repository root with `DEBUG=true uvicorn backend.app.main:app --reload --port 8000 --loop asyncio` (adapt env syntax on Windows); `cd frontend && npm run dev` serves the UI on port 5173.
+- Focused backend check from root: `python -m pytest backend/tests/unit/path/to/test_file.py::test_name`; lint/format: `ruff check backend/` and `ruff format --check backend/`. Root `test_backend.sh` hardcodes `../venv/bin/python3`, 30 pytest workers, and omits `test_bambu_ftp.py` unless passed `--full`; use direct pytest for a focused run or a different venv layout.
+- Focused frontend check from `frontend/`: `npx vitest run src/path/to/file.test.tsx`. Full checks: `npm run lint`, `npm run typecheck`, `npm run test:run`, `npm run build`. Use `npm run typecheck` (`tsc -b`), not plain `tsc`: root TS config only references projects. `npm test` is watch mode and does **not** run the i18n gate; `test:run` does. Build additionally runs `check:baseline` for browser compatibility.
+- For user-visible frontend text, add keys in **every** `frontend/src/i18n/locales/*.ts` (English is reference), preserve placeholders, and run `npm run check:i18n`; identical English placeholders in other locales fail the parity check unless specifically allowed.
+- `backend/tests/conftest.py` must set `DATABASE_URL` to a disposable SQLite DB **before app imports**; do not bypass its guard or import app modules before it. Unit/API tests use additional isolated fixtures; Docker integration additionally runs a live app (`docker-compose.test.yml`).
+- `test_all.sh` runs frontend → backend `--full` → Docker → full security scans; it is expensive. `test_docker.sh` uses `sudo` and its exit trap runs `docker compose down -v` for both test and default Compose projects: do not run it against an installation whose volumes must be kept. Use targeted checks instead.
+
+See `CONTRIBUTING.md` for permission conventions and contribution/docs policy; `.github/workflows/ci.yml` and the manifests/scripts above are the authority for current checks.
