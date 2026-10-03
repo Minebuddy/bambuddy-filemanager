@@ -3202,7 +3202,13 @@ async def batch_generate_stl_thumbnails(
 
     user, can_modify_all = auth_result
     if not can_modify_all:
-        query = query.where(LibraryFile.created_by_id == user.id)
+        manager_folder_ids = await accessible_folder_ids(db, user, "manager")
+        access_conditions = [LibraryFile.created_by_id == user.id]
+        if manager_folder_ids:
+            access_conditions.append(
+                LibraryFile.folder_id.in_(manager_folder_ids)
+            )
+        query = query.where(or_(*access_conditions))
 
     if request.file_ids:
         # Specific files
@@ -3343,6 +3349,14 @@ async def combine_files(
         ).scalar_one_or_none()
         if folder is None:
             raise HTTPException(status_code=404, detail="Folder not found")
+        await _require_folder_role(
+            db,
+            folder,
+            current_user,
+            current_user is None
+            or current_user.has_permission(Permission.LIBRARY_UPDATE_ALL.value),
+            "contributor",
+        )
 
     # Same per-row visibility the slice route applies: a READ_OWN caller must
     # not be able to pull another user's model into their own file by raw id.
@@ -3456,14 +3470,20 @@ async def add_files_to_queue(
     result = await db.execute(LibraryFile.active().where(LibraryFile.id.in_(request.file_ids)))
     files = {f.id: f for f in result.scalars().all()}
 
-    # Ownership-scoped reads apply here as everywhere else in this module: a
-    # file the caller may not read is a file they may not print. Dropped from
-    # the map rather than refused by name, so the per-file error below is the
-    # same "File not found" an unknown id gets and the response says nothing
-    # about which ids exist. Ownerless rows need LIBRARY_READ_ALL, matching
-    # _ensure_library_file_visible.
+    # Library visibility applies here as everywhere else: a file the caller may
+    # not read is a file they may not print. Keep hidden ids indistinguishable
+    # from unknown ids, while allowing viewer-or-better inherited shares.
     if current_user is not None and not current_user.has_permission(Permission.LIBRARY_READ_ALL.value):
-        files = {fid: f for fid, f in files.items() if f.created_by_id == current_user.id}
+        read_roles = await folder_access_roles(db, current_user)
+        files = {
+            fid: lib_file
+            for fid, lib_file in files.items()
+            if lib_file.created_by_id == current_user.id
+            or (
+                lib_file.folder_id is not None
+                and role_allows(read_roles.get(lib_file.folder_id), "viewer")
+            )
+        }
 
     # Project attribution (#1897): a file queued from a project-linked folder
     # inherits that project, so the resulting archive counts toward the
