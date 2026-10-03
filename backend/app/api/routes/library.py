@@ -1007,8 +1007,10 @@ async def list_folders(
         .outerjoin(PrintArchive, LibraryFolder.archive_id == PrintArchive.id)
     )
     visible_folder_ids: set[int] | None = None
+    folder_roles: dict[int, str] = {}
     if user is not None and not can_read_all:
-        visible_folder_ids = await accessible_folder_ids(db, user, "viewer")
+        folder_roles = await folder_access_roles(db, user)
+        visible_folder_ids = set(folder_roles)
         if not visible_folder_ids:
             return []
         folder_query = folder_query.where(LibraryFolder.id.in_(visible_folder_ids))
@@ -1066,6 +1068,7 @@ async def list_folders(
             external_path=folder.external_path,
             external_readonly=folder.external_readonly,
             file_count=file_counts.get(folder.id, 0),
+            access_role="manager" if can_read_all else folder_roles.get(folder.id),
             latest_activity_at=own_activity,
             children=[],
         )
@@ -2516,8 +2519,10 @@ async def list_files(
         selectinload(LibraryFile.tags),
     )
     visible_folder_ids: set[int] | None = None
+    file_folder_roles: dict[int, str] = {}
     if user is not None and not can_read_all:
-        visible_folder_ids = await accessible_folder_ids(db, user, "viewer")
+        file_folder_roles = await folder_access_roles(db, user)
+        visible_folder_ids = set(file_folder_roles)
         visibility_conditions = [LibraryFile.created_by_id == user.id]
         if visible_folder_ids:
             visibility_conditions.append(
@@ -2629,6 +2634,11 @@ async def list_files(
                 thumbnail_path=f.thumbnail_path,
                 print_count=f.print_count,
                 duplicate_count=hash_counts.get(f.file_hash, 0) if f.file_hash else 0,
+                access_role=(
+                    "manager"
+                    if can_read_all or (user is not None and f.created_by_id == user.id)
+                    else file_folder_roles.get(f.folder_id) if f.folder_id is not None else None
+                ),
                 created_by_id=f.created_by_id,
                 created_by_username=f.created_by.username if f.created_by else None,
                 created_at=f.created_at,

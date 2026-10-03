@@ -148,6 +148,7 @@ class FolderTreeItem(BaseModel):
     external_path: str | None = None
     external_readonly: bool = False
     file_count: int = 0
+    access_role: FolderShareRole | None = None
     # See FolderResponse.latest_activity_at — #1770 folder sort source.
     latest_activity_at: datetime | None = None
     children: list["FolderTreeItem"] = []
@@ -278,6 +279,7 @@ class FileListResponse(BaseModel):
     thumbnail_path: str | None
     print_count: int
     duplicate_count: int = 0
+    access_role: FolderShareRole | None = None
     # User tracking (Issue #206)
     created_by_id: int | None = None
     created_by_username: str | None = None
