@@ -796,6 +796,8 @@ interface FolderActionsMenuProps {
   onLink: (folder: LibraryFolderTree) => void;
   onRename: (folder: LibraryFolderTree) => void;
   onManageOwner: (folder: LibraryFolderTree) => void;
+  onManageAccess: (folder: LibraryFolderTree) => void;
+  currentUserId: number | null;
   isAdmin: boolean;
   hasPermission: (permission: Permission) => boolean;
   // Hide the kebab until its `group` row is hovered or focused — only for
