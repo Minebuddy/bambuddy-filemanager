@@ -58,4 +58,18 @@ describe('LibraryAccessSettings', () => {
     await waitFor(() => expect(body).toEqual({principal_type: 'user', principal_id: 7, role: 'viewer'}));
   });
 
+  it('explains ownership access after revoking a direct share', async () => {
+    handlers();
+    server.use(http.post('/api/v1/library/access/bulk', () => HttpResponse.json({updated: 1, removed: 1, retained_access: [{id: 1, reason: 'Ownership'}]})));
+    render(<LibraryAccessSettings />);
+    await screen.findByText('model-1.stl');
+    const user = userEvent.setup();
+    await user.click(screen.getByLabelText('Select model-1.stl'));
+    await user.selectOptions(screen.getByLabelText('Bulk action'), 'revoke');
+    await user.selectOptions(screen.getByLabelText('User or group'), '7');
+    await user.click(screen.getByRole('button', {name: 'Apply to 1 selected'}));
+    expect(await screen.findByText('1 selected items remain visible to this user.')).toBeInTheDocument();
+    expect(screen.getByText('Ownership')).toBeInTheDocument();
+  });
+
 });

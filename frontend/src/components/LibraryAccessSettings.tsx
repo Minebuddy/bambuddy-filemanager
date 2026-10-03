@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { librarySharingApi, type BulkAccessRequest, type FolderShareRole } from '../api/librarySharing';
+import { librarySharingApi, type BulkAccessRequest, type BulkAccessResult, type FolderShareRole } from '../api/librarySharing';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { Button } from './Button';
@@ -10,6 +10,7 @@ export function LibraryAccessSettings() {
   const { isAdmin, authEnabled } = useAuth();
   const { showToast } = useToast();
   const client = useQueryClient();
+  const [result, setResult] = useState<BulkAccessResult | null>(null);
   const [kind, setKind] = useState<'file' | 'folder'>('file');
   const [search, setSearch] = useState('');
   const [ownerFilter, setOwnerFilter] = useState('');
@@ -28,8 +29,9 @@ export function LibraryAccessSettings() {
   const principals = useQuery({queryKey: ['library-access-principals'], queryFn: librarySharingApi.getAccessPrincipals});
   const mutation = useMutation({
     mutationFn: librarySharingApi.bulkAccess,
-    onSuccess: (result) => {
-      showToast(`Updated ${result.updated} selected items.`, 'success');
+    onSuccess: (result, request) => {
+      setResult(request.action === 'revoke' ? result : null);
+      showToast(request.action === 'revoke' ? `Removed ${result.removed ?? result.updated} direct grants.` : `Updated ${result.updated} selected items.`, 'success');
       setSelected([]);
       for (const key of ['library-access-resources', 'library-folders', 'library-files', 'library-stats', 'library-folder-access-overview', 'library-resource-shares']) client.invalidateQueries({queryKey: [key]});
     },
@@ -37,21 +39,21 @@ export function LibraryAccessSettings() {
   });
   const rows = resources.data?.items ?? [];
   const picker = principalType === 'user' ? principals.data?.users : principals.data?.groups;
-  const control = 'rounded border border-bambu-dark-tertiary bg-bambu-dark p-2 text-white';
+  const control = 'min-h-10 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark px-3 py-2 text-white focus:border-bambu-green focus:outline-none';
   const reset = () => { setOffset(0); setSelected([]); };
   return <section className="space-y-4">
     <h2 className="text-xl font-semibold">Library access</h2>
     <p className="text-sm text-bambu-gray">Manage ownership and direct user/group access. Sharing a folder does not share its files or subfolders. Parent folders appear only as navigation.</p>
-    <div className="flex flex-wrap gap-3">
+    <div className="flex flex-wrap items-center gap-3 rounded-lg bg-bambu-dark-secondary p-4">
       <select aria-label="Item type" className={control} value={kind} onChange={e => {setKind(e.target.value as typeof kind); setRole('viewer'); reset();}}><option value="file">Files</option><option value="folder">Folders</option></select>
       <input aria-label="Search library items" className={control} placeholder="Search names" value={search} onChange={e => {setSearch(e.target.value); reset();}} />
       <select aria-label="Filter by owner" className={control} value={ownerFilter} onChange={e => {setOwnerFilter(e.target.value); reset();}}><option value="">All owners</option><option value="unassigned">Unassigned</option>{principals.data?.users.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
     </div>
     {resources.isError && <p role="alert">{resources.error.message}</p>}
     {principals.isError && <p role="alert">{principals.error.message}</p>}
-    <div className="rounded border border-bambu-dark-tertiary p-3 space-y-3">
+    <div className="rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary p-4 space-y-4">
       <p>{selected.length} selected on this page</p>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-3">
         <select aria-label="Bulk action" className={control} value={action} onChange={e => setAction(e.target.value as typeof action)}><option value="grant">Grant / update access</option><option value="revoke">Revoke access</option>{(isAdmin || !authEnabled) && <option value="owner">Assign ownership</option>}</select>
         {action === 'owner' ? <select aria-label="New owner" className={control} value={ownerId} onChange={e => setOwnerId(e.target.value)}><option value="">Unassigned</option>{principals.data?.users.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select> : <>
           <select aria-label="Principal type" className={control} value={principalType} onChange={e => {setPrincipalType(e.target.value as typeof principalType); setPrincipalId('');}}><option value="user">User</option><option value="group">Group</option></select>
@@ -62,7 +64,11 @@ export function LibraryAccessSettings() {
       </div>
       <p className="text-xs text-bambu-gray">Only selected items change. Ownership assignment preserves existing shares. Revoking a grant does not remove access through ownership or another user/group grant.</p>
     </div>
-    <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left"><th className="p-2"><input type="checkbox" aria-label="Select this page" checked={!!rows.length && selected.length === rows.length} onChange={e => setSelected(e.target.checked ? rows.map(r => r.id) : [])} /></th><th>Name / path</th><th>Owner</th><th>Direct access</th><th /></tr></thead><tbody>{rows.map(row => <tr key={row.id} className="border-t border-bambu-dark-tertiary"><td className="p-2"><input type="checkbox" aria-label={`Select ${row.name}`} checked={selected.includes(row.id)} onChange={e => setSelected(e.target.checked ? [...selected, row.id] : selected.filter(id => id !== row.id))} /></td><td className="p-2"><div>{row.name}</div><div className="text-xs text-bambu-gray">{row.path || 'Library'}</div></td><td>{row.owner_name || 'Unassigned'}</td><td>{row.shares.map(s => `${s.principal_name} (${s.principal_type}, ${s.role})`).join(', ') || 'None'}</td><td><Button variant="secondary" size="sm" onClick={() => setEditing(row)}>Manage access</Button></td></tr>)}</tbody></table></div>
+    {result && <div role="status" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm space-y-2">
+      <p className="font-medium">Removed {result.removed ?? result.updated} direct grants.</p>
+      {!!result.retained_access?.length && <><p>{result.retained_access.length} selected items remain visible to this user.</p><ul className="list-disc pl-5">{[...new Set(result.retained_access.map(item => item.reason))].map(reason => <li key={reason}>{reason}</li>)}</ul><p>Revoking a share does not remove ownership. To remove owner access, use Assign ownership and choose another owner or Unassigned. Accessible files can keep their parent paths visible.</p></>}
+    </div>}
+    <div className="overflow-x-auto rounded-lg border border-bambu-dark-tertiary"><table className="w-full min-w-[800px] text-sm table-fixed"><colgroup><col className="w-12" /><col className="w-[36%]" /><col className="w-[16%]" /><col className="w-[28%]" /><col className="w-40" /></colgroup><thead className="bg-bambu-dark-secondary"><tr className="text-left text-bambu-gray"><th className="px-4 py-3"><input type="checkbox" aria-label="Select this page" checked={!!rows.length && selected.length === rows.length} onChange={e => setSelected(e.target.checked ? rows.map(r => r.id) : [])} /></th><th className="px-4 py-3">Name / path</th><th className="px-4 py-3">Owner</th><th className="px-4 py-3">Direct access</th><th className="px-4 py-3">Actions</th></tr></thead><tbody>{rows.map(row => <tr key={row.id} className="border-t border-bambu-dark-tertiary hover:bg-bambu-dark-secondary/50 align-top"><td className="px-4 py-4"><input type="checkbox" aria-label={`Select ${row.name}`} checked={selected.includes(row.id)} onChange={e => setSelected(e.target.checked ? [...selected, row.id] : selected.filter(id => id !== row.id))} /></td><td className="px-4 py-4"><div className="font-medium break-words" title={row.name}>{row.name}</div><div className="mt-1 text-xs text-bambu-gray break-words">{row.path || 'Library'}</div></td><td className="px-4 py-4 break-words"><span className="inline-block rounded bg-bambu-dark-secondary px-2 py-1">{row.owner_name || 'Unassigned'}</span></td><td className="px-4 py-4"><div className="flex flex-wrap gap-2">{row.shares.map(s => <span key={s.id} className="rounded border border-bambu-dark-tertiary px-2 py-1 break-words">{s.principal_name} <span className="text-bambu-gray">({s.principal_type}, {s.role})</span>{s.principal_type === 'user' && s.principal_id === row.owner_id && <span className="block text-xs text-amber-300">Already has owner access</span>}</span>)}{!row.shares.length && <span className="text-bambu-gray">No direct shares</span>}</div></td><td className="px-4 py-4"><Button variant="secondary" size="sm" onClick={() => setEditing(row)}>Manage access</Button></td></tr>)}</tbody></table></div>
     {resources.isPending ? <p>Loading…</p> : !rows.length && !resources.isError ? <p>No matching items.</p> : null}
     <div className="flex gap-2"><Button variant="secondary" disabled={!offset || resources.isFetching} onClick={() => {setOffset(Math.max(0, offset - 100)); setSelected([]);}}>Previous</Button><Button variant="secondary" disabled={!resources.data?.has_more || resources.isFetching} onClick={() => {setOffset(offset + 100); setSelected([]);}}>Next</Button></div>
     {editing && <FolderSharingModal folder={editing} kind={kind === 'file' ? 'files' : 'folders'} onClose={() => setEditing(null)} />}

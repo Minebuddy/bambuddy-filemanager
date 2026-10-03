@@ -73,10 +73,15 @@ export interface BulkAccessRequest {
   role?: FolderShareRole;
   owner_id?: number | null;
 }
+export interface BulkAccessResult {
+  updated: number;
+  removed?: number;
+  retained_access?: {id: number; reason: string}[];
+}
 export const librarySharingApi = {
   getAccessResources: (params: URLSearchParams) => request<{items: AccessResource[]; has_more: boolean}>(`/library/access/resources?${params}`),
   getAccessPrincipals: () => request<FolderSharePrincipals>('/library/access/principals'),
-  bulkAccess: (data: BulkAccessRequest) => request<{updated: number}>('/library/access/bulk', {method: 'POST', body: JSON.stringify(data)}),
+  bulkAccess: (data: BulkAccessRequest) => request<BulkAccessResult>('/library/access/bulk', {method: 'POST', body: JSON.stringify(data)}),
   getShares: (folderId: number, kind: 'folders' | 'files' = 'folders') =>
     request<FolderShare[]>(`/library/${kind}/${folderId}/shares`),
 

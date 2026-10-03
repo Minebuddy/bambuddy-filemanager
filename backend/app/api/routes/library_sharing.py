@@ -14,6 +14,7 @@ from backend.app.models.group import Group
 from backend.app.models.library import LibraryFile, LibraryFileShare, LibraryFolder, LibraryFolderShare
 from backend.app.models.user import User
 from backend.app.schemas.library import FolderShareUpsert
+from backend.app.services.library_access import file_access_roles, folder_access_roles, navigation_folder_ids
 
 router = APIRouter()
 ShareUser = Depends(require_permission_if_auth_enabled(Permission.LIBRARY_SHARE))
@@ -225,6 +226,8 @@ async def bulk_access(data: BulkAccess, db: AsyncSession = Depends(get_db), user
             raise HTTPException(400, "External or trashed items cannot be managed here")
         if user and not user.is_admin and item.created_by_id != user.id:
             raise HTTPException(403, "Only the owner or an administrator can manage access")
+    removed = 0
+    retained_access = []
     if data.action == "owner":
         if data.owner_id is not None:
             await principal(db, FolderShareUpsert(principal_type="user", principal_id=data.owner_id, role="manager"))
@@ -236,7 +239,7 @@ async def bulk_access(data: BulkAccess, db: AsyncSession = Depends(get_db), user
         if data.principal_id is None:
             raise HTTPException(422, "Select a user or group")
         grant = FolderShareUpsert(principal_type=data.principal_type, principal_id=data.principal_id, role=data.role)
-        await principal(db, grant)
+        recipient = await principal(db, grant)
         for item in items:
             if data.action == "grant":
                 await set_share(db, share_model, key, item.id, grant, user)
@@ -251,5 +254,30 @@ async def bulk_access(data: BulkAccess, db: AsyncSession = Depends(get_db), user
                 ).scalar_one_or_none()
                 if existing:
                     await db.delete(existing)
+                    removed += 1
+        if data.action == "revoke" and data.principal_type == "user":
+            await db.flush()
+            roles = (
+                await file_access_roles(db, recipient)
+                if data.kind == "file"
+                else await folder_access_roles(db, recipient)
+            )
+            navigation = await navigation_folder_ids(db, recipient) if data.kind == "folder" else set()
+            for item in items:
+                reason = None
+                if recipient.is_admin or recipient.has_permission(Permission.LIBRARY_READ_ALL.value):
+                    reason = "Global library access"
+                elif item.created_by_id == recipient.id:
+                    reason = "Ownership"
+                elif item.id in roles:
+                    reason = "Another user or group grant"
+                elif item.id in navigation:
+                    reason = "Navigation to accessible files or folders"
+                if reason:
+                    retained_access.append({"id": item.id, "reason": reason})
     await db.commit()
-    return {"updated": len(items)}
+    return {
+        "updated": removed if data.action == "revoke" else len(items),
+        "removed": removed,
+        "retained_access": retained_access,
+    }

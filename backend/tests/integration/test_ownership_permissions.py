@@ -2084,6 +2084,29 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
         )
         assert response.status_code == 404
 
+    async def test_revoke_reports_ownership_and_navigation_access(
+        self, async_client, auth_setup, library_folder_factory, library_file_factory
+    ):
+        user_id = auth_setup["operator_user"]["id"]
+        folder = await library_folder_factory(created_by_id=auth_setup["operator2_user"]["id"])
+        file = await library_file_factory(folder_id=folder.id, created_by_id=user_id)
+        await self._grant_file(async_client, auth_setup, file.id, "viewer")
+        await self._grant(async_client, auth_setup, folder.id, "viewer")
+        admin = {"Authorization": f"Bearer {auth_setup['admin_token']}"}
+        data = {"kind": "file", "ids": [file.id], "action": "revoke", "principal_type": "user", "principal_id": user_id}
+        result = (await async_client.post("/api/v1/library/access/bulk", headers=admin, json=data)).json()
+        assert result["removed"] == 1 and result["updated"] == 1
+        assert result["retained_access"] == [{"id": file.id, "reason": "Ownership"}]
+        result = (await async_client.post("/api/v1/library/access/bulk", headers=admin, json=data)).json()
+        assert result["removed"] == 0 and result["updated"] == 0
+        data.update(kind="folder", ids=[folder.id])
+        result = (await async_client.post("/api/v1/library/access/bulk", headers=admin, json=data)).json()
+        assert result["removed"] == 1
+        assert result["retained_access"] == [{"id": folder.id, "reason": "Navigation to accessible files or folders"}]
+        headers = {"Authorization": f"Bearer {auth_setup['operator_token']}"}
+        tree = (await async_client.get("/api/v1/library/folders", headers=headers)).json()
+        assert tree[0]["id"] == folder.id and tree[0]["navigation_only"]
+
     async def _grant_file(self, client, setup, file_id, role, *, principal_id=None, principal_type="user"):
         response = await client.put(
             f"/api/v1/library/files/{file_id}/shares",
