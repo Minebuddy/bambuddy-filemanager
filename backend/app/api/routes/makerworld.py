@@ -361,9 +361,7 @@ async def import_instance(
                 LibraryFolder.is_external.is_(False),
             )
             if resource_user is not None:
-                default_folder_query = default_folder_query.where(
-                    LibraryFolder.created_by_id == resource_user.id
-                )
+                default_folder_query = default_folder_query.where(LibraryFolder.created_by_id == resource_user.id)
             else:
                 default_folder_query = default_folder_query.where(LibraryFolder.created_by_id.is_(None))
             default_folder_q = await db.execute(default_folder_query)
@@ -484,14 +482,10 @@ async def recent_imports(
     _ = current_user  # permission gate only
     capped = max(1, min(50, int(limit)))
 
-    recent_query = LibraryFile.active().where(
-        LibraryFile.source_type == makerworld_provider.source_type
-    )
+    recent_query = LibraryFile.active().where(LibraryFile.source_type == makerworld_provider.source_type)
     if current_user is not None and not current_user.has_permission(Permission.LIBRARY_READ_ALL.value):
         recent_query = recent_query.where(LibraryFile.created_by_id == current_user.id)
-    result = await db.execute(
-        recent_query.order_by(LibraryFile.created_at.desc()).limit(capped)
-    )
+    result = await db.execute(recent_query.order_by(LibraryFile.created_at.desc()).limit(capped))
     rows = result.scalars().all()
 
     return [

@@ -1081,9 +1081,7 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_admin_lists_all_library_folders(
-        self, async_client: AsyncClient, auth_setup, library_folder_factory
-    ):
+    async def test_admin_lists_all_library_folders(self, async_client: AsyncClient, auth_setup, library_folder_factory):
         own = await library_folder_factory(
             name="OperatorFolder",
             created_by_id=auth_setup["operator_user"]["id"],
@@ -1148,9 +1146,7 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_create_folder_records_authenticated_owner(
-        self, async_client: AsyncClient, auth_setup, db_session
-    ):
+    async def test_create_folder_records_authenticated_owner(self, async_client: AsyncClient, auth_setup, db_session):
         from sqlalchemy import select
 
         from backend.app.models.library import LibraryFolder
@@ -1164,9 +1160,7 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
         assert response.status_code == 200
         folder_id = response.json()["id"]
         db_session.expire_all()
-        folder = (
-            await db_session.execute(select(LibraryFolder).where(LibraryFolder.id == folder_id))
-        ).scalar_one()
+        folder = (await db_session.execute(select(LibraryFolder).where(LibraryFolder.id == folder_id))).scalar_one()
         assert folder.created_by_id == auth_setup["operator_user"]["id"]
 
     @pytest.mark.asyncio
@@ -1255,9 +1249,7 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_zip_created_folders_are_owned_by_operator(
-        self, async_client: AsyncClient, auth_setup, db_session
-    ):
+    async def test_zip_created_folders_are_owned_by_operator(self, async_client: AsyncClient, auth_setup, db_session):
         import io
         import zipfile
 
@@ -1270,8 +1262,7 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
             zf.writestr("nested/model.txt", "hello")
 
         response = await async_client.post(
-            "/api/v1/library/files/extract-zip"
-            "?create_folder_from_zip=true&preserve_structure=true",
+            "/api/v1/library/files/extract-zip?create_folder_from_zip=true&preserve_structure=true",
             files={"file": ("OwnedBundle.zip", payload.getvalue(), "application/zip")},
             headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
         )
@@ -1279,16 +1270,12 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
         assert response.status_code == 200
         db_session.expire_all()
         folders = (
-            await db_session.execute(
-                select(LibraryFolder).where(
-                    LibraryFolder.name.in_(["OwnedBundle", "nested"])
-                )
-            )
-        ).scalars().all()
+            (await db_session.execute(select(LibraryFolder).where(LibraryFolder.name.in_(["OwnedBundle", "nested"]))))
+            .scalars()
+            .all()
+        )
         assert len(folders) == 2
-        assert {folder.created_by_id for folder in folders} == {
-            auth_setup["operator_user"]["id"]
-        }
+        assert {folder.created_by_id for folder in folders} == {auth_setup["operator_user"]["id"]}
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -1322,9 +1309,7 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_operator_can_update_own_folder(
-        self, async_client: AsyncClient, auth_setup, library_folder_factory
-    ):
+    async def test_operator_can_update_own_folder(self, async_client: AsyncClient, auth_setup, library_folder_factory):
         folder = await library_folder_factory(
             name="OldName",
             created_by_id=auth_setup["operator_user"]["id"],

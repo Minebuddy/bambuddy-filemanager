@@ -1393,9 +1393,7 @@ async def update_folder(
             raise HTTPException(status_code=400, detail="Folder cannot be its own parent")
 
         if data.parent_id != 0:
-            destination_result = await db.execute(
-                select(LibraryFolder).where(LibraryFolder.id == data.parent_id)
-            )
+            destination_result = await db.execute(select(LibraryFolder).where(LibraryFolder.id == data.parent_id))
             destination = destination_result.scalar_one_or_none()
             if destination is None:
                 raise HTTPException(status_code=404, detail="Parent folder not found")
@@ -1406,9 +1404,7 @@ async def update_folder(
             while current_id is not None:
                 if current_id == folder_id:
                     raise HTTPException(status_code=400, detail="Cannot move folder into its own subtree")
-                parent_result = await db.execute(
-                    select(LibraryFolder.parent_id).where(LibraryFolder.id == current_id)
-                )
+                parent_result = await db.execute(select(LibraryFolder.parent_id).where(LibraryFolder.id == current_id))
                 current_id = parent_result.scalar()
 
             folder.parent_id = data.parent_id
