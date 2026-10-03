@@ -6,7 +6,11 @@ services:
       args:
         BAMBUDDY_BUILD_BRANCH: feature/library-access-control
 
+    # This image is built locally from the Git checkout. Portainer's
+    # "Pull and redeploy" runs docker compose pull first, so explicitly prevent
+    # Compose from trying to fetch this local-only tag from a registry.
     image: bambuddy-filemanager:test
+    pull_policy: never
     container_name: bambuddy-filemanager-test
 
     cap_add:
