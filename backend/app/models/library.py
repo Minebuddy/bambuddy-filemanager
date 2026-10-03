@@ -17,6 +17,13 @@ class LibraryFolder(Base):
     name: Mapped[str] = mapped_column(String(255))
     parent_id: Mapped[int | None] = mapped_column(ForeignKey("library_folders.id", ondelete="CASCADE"), nullable=True)
 
+    # User tracking (#3201). Folder ownership mirrors LibraryFile ownership so
+    # library:read_own can scope the folder tree as well as the files inside it.
+    # NULL is reserved for legacy/system-created folders and requires read_all.
+    created_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
     # External folder flags (for folders that point to external paths)
     is_external: Mapped[bool] = mapped_column(Boolean, default=False)
     external_readonly: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -80,6 +87,7 @@ class LibraryFolder(Base):
     )
     project: Mapped["Project | None"] = relationship()
     archive: Mapped["PrintArchive | None"] = relationship()
+    created_by: Mapped["User | None"] = relationship()
 
 
 class FileVariantGroup(Base):

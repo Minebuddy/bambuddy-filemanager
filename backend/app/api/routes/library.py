@@ -143,6 +143,26 @@ def _ensure_library_file_visible(
     return library_file
 
 
+def _ensure_library_folder_visible(
+    folder: LibraryFolder | None,
+    user: User | None,
+    can_read_all: bool,
+) -> LibraryFolder:
+    """Per-folder visibility gate for ownership-scoped library reads (#3201).
+
+    Ownerless legacy/system folders require ``library:read_all``. Returning
+    404 rather than 403 for another user's folder matches the existing file
+    visibility gate and avoids turning numeric IDs into an enumeration API.
+    """
+    if folder is None:
+        raise HTTPException(404, "Folder not found")
+    if can_read_all:
+        return folder
+    if user is None or folder.created_by_id is None or folder.created_by_id != user.id:
+        raise HTTPException(404, "Folder not found")
+    return folder
+
+
 def get_library_dir() -> Path:
     """Get the library storage directory."""
     base_dir = Path(app_settings.archive_dir)
@@ -924,40 +944,41 @@ async def _backfill_external_thumbnails(folder_ids: list[int]) -> None:
 async def list_folders(
     response: Response,
     db: AsyncSession = Depends(get_db),
-    _: tuple[User | None, bool] = Depends(
+    auth_result: tuple[User | None, bool] = Depends(
         require_ownership_permission(
             Permission.LIBRARY_READ_ALL,
             Permission.LIBRARY_READ_OWN,
         )
     ),
 ):
-    """Get all folders as a tree structure."""
-    # Prevent browser caching of folder list
+    """Get the folder tree visible to the current library reader."""
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    user, can_read_all = auth_result
 
-    # Get all folders with project and archive joins
-    result = await db.execute(
+    folder_query = (
         select(LibraryFolder, Project.name, PrintArchive.print_name)
         .outerjoin(Project, LibraryFolder.project_id == Project.id)
         .outerjoin(PrintArchive, LibraryFolder.archive_id == PrintArchive.id)
-        .order_by(LibraryFolder.name)
     )
+    if user is not None and not can_read_all:
+        folder_query = folder_query.where(LibraryFolder.created_by_id == user.id)
+
+    result = await db.execute(folder_query.order_by(LibraryFolder.name))
     rows = result.all()
 
-    # Get file counts per folder
-    file_counts_result = await db.execute(
+    # Counts/activity must use the same file visibility scope as the file pane;
+    # otherwise a read_own user can learn that hidden files exist in a folder.
+    file_counts_query = (
         select(LibraryFile.folder_id, func.count(LibraryFile.id))
         .where(LibraryFile.folder_id.isnot(None), LibraryFile.deleted_at.is_(None))
         .group_by(LibraryFile.folder_id)
     )
+    if user is not None and not can_read_all:
+        file_counts_query = file_counts_query.where(LibraryFile.created_by_id == user.id)
+    file_counts_result = await db.execute(file_counts_query)
     file_counts = dict(file_counts_result.all())
 
-    # Latest immediate-child file activity per folder (#1770/#2680). Real on-disk
-    # mtime when we have it (external scans populate ``fs_modified_at``), else the
-    # DB ``updated_at`` — COALESCE so external rows scanned before this field
-    # existed, and internal uploads, still contribute a signal. This is the
-    # per-folder *leaf* value; subtree descent is aggregated recursively below.
-    latest_file_activity_result = await db.execute(
+    latest_file_activity_query = (
         select(
             LibraryFile.folder_id,
             func.max(func.coalesce(LibraryFile.fs_modified_at, LibraryFile.updated_at)),
@@ -965,13 +986,11 @@ async def list_folders(
         .where(LibraryFile.folder_id.isnot(None), LibraryFile.deleted_at.is_(None))
         .group_by(LibraryFile.folder_id)
     )
+    if user is not None and not can_read_all:
+        latest_file_activity_query = latest_file_activity_query.where(LibraryFile.created_by_id == user.id)
+    latest_file_activity_result = await db.execute(latest_file_activity_query)
     latest_file_activity = dict(latest_file_activity_result.all())
 
-    # Build tree structure. Each folder's initial ``latest_activity_at`` is its own
-    # leaf activity: the newer of its real directory mtime (fallback updated_at)
-    # and its immediate files' mtime. The recursive bubble below then rolls each
-    # subtree's newest descendant up to its ancestors (#2680 — sorting must match
-    # ``ls -t`` recursively, so a freshly-added deep file lifts every parent).
     folder_map = {}
     root_folders = []
 
@@ -997,19 +1016,18 @@ async def list_folders(
         )
         folder_map[folder.id] = folder_item
 
-    # Link children to parents
     for folder, _, _ in rows:
         folder_item = folder_map[folder.id]
         if folder.parent_id is None:
             root_folders.append(folder_item)
         elif folder.parent_id in folder_map:
             folder_map[folder.parent_id].children.append(folder_item)
+        else:
+            # Legacy databases can contain a user-owned child below an unowned
+            # parent. Do not make the owned folder disappear merely because the
+            # parent is outside the caller's scope; surface it as a tree root.
+            root_folders.append(folder_item)
 
-    # Recursive newest-descendant bubble (#2680). Post-order: a folder's activity
-    # becomes the max of its own leaf activity and every descendant's, so sorting
-    # the tree by ``latest_activity_at`` surfaces the branch with the most recent
-    # activity anywhere inside it. Iterative stack keeps deep external mounts off
-    # Python's recursion limit.
     def _bubble(root: FolderTreeItem) -> None:
         order: list[FolderTreeItem] = []
         stack = [root]
@@ -1017,7 +1035,7 @@ async def list_folders(
             node = stack.pop()
             order.append(node)
             stack.extend(node.children)
-        for node in reversed(order):  # deepest first
+        for node in reversed(order):
             for child in node.children:
                 if child.latest_activity_at is not None and (
                     node.latest_activity_at is None or child.latest_activity_at > node.latest_activity_at
@@ -1034,35 +1052,38 @@ async def list_folders(
 async def get_folders_by_project(
     project_id: int,
     db: AsyncSession = Depends(get_db),
-    _: tuple[User | None, bool] = Depends(
+    auth_result: tuple[User | None, bool] = Depends(
         require_ownership_permission(
             Permission.LIBRARY_READ_ALL,
             Permission.LIBRARY_READ_OWN,
         )
     ),
 ):
-    """Get all folders linked to a specific project."""
-    result = await db.execute(
+    """Get folders linked to a project within the caller's library scope."""
+    user, can_read_all = auth_result
+    folder_query = (
         select(LibraryFolder, Project.name)
         .outerjoin(Project, LibraryFolder.project_id == Project.id)
         .where(LibraryFolder.project_id == project_id)
-        .order_by(LibraryFolder.name)
     )
+    if user is not None and not can_read_all:
+        folder_query = folder_query.where(LibraryFolder.created_by_id == user.id)
+
+    result = await db.execute(folder_query.order_by(LibraryFolder.name))
     rows = result.all()
 
     folders = []
     for folder, project_name in rows:
-        # Get file count + latest file activity (#1770/#2680) in one trip. Prefer
-        # the real on-disk mtime (external scans), fall back to the DB updated_at.
-        agg_result = await db.execute(
-            select(
-                func.count(LibraryFile.id),
-                func.max(func.coalesce(LibraryFile.fs_modified_at, LibraryFile.updated_at)),
-            ).where(
-                LibraryFile.folder_id == folder.id,
-                LibraryFile.deleted_at.is_(None),
-            )
+        agg_query = select(
+            func.count(LibraryFile.id),
+            func.max(func.coalesce(LibraryFile.fs_modified_at, LibraryFile.updated_at)),
+        ).where(
+            LibraryFile.folder_id == folder.id,
+            LibraryFile.deleted_at.is_(None),
         )
+        if user is not None and not can_read_all:
+            agg_query = agg_query.where(LibraryFile.created_by_id == user.id)
+        agg_result = await db.execute(agg_query)
         file_count, latest_file = agg_result.one()
         file_count = file_count or 0
         own_activity = folder.fs_modified_at or folder.updated_at
@@ -1095,35 +1116,38 @@ async def get_folders_by_project(
 async def get_folders_by_archive(
     archive_id: int,
     db: AsyncSession = Depends(get_db),
-    _: tuple[User | None, bool] = Depends(
+    auth_result: tuple[User | None, bool] = Depends(
         require_ownership_permission(
             Permission.LIBRARY_READ_ALL,
             Permission.LIBRARY_READ_OWN,
         )
     ),
 ):
-    """Get all folders linked to a specific archive."""
-    result = await db.execute(
+    """Get folders linked to an archive within the caller's library scope."""
+    user, can_read_all = auth_result
+    folder_query = (
         select(LibraryFolder, PrintArchive.print_name)
         .outerjoin(PrintArchive, LibraryFolder.archive_id == PrintArchive.id)
         .where(LibraryFolder.archive_id == archive_id)
-        .order_by(LibraryFolder.name)
     )
+    if user is not None and not can_read_all:
+        folder_query = folder_query.where(LibraryFolder.created_by_id == user.id)
+
+    result = await db.execute(folder_query.order_by(LibraryFolder.name))
     rows = result.all()
 
     folders = []
     for folder, archive_name in rows:
-        # Get file count + latest file activity (#1770/#2680) in one trip. Prefer
-        # the real on-disk mtime (external scans), fall back to the DB updated_at.
-        agg_result = await db.execute(
-            select(
-                func.count(LibraryFile.id),
-                func.max(func.coalesce(LibraryFile.fs_modified_at, LibraryFile.updated_at)),
-            ).where(
-                LibraryFile.folder_id == folder.id,
-                LibraryFile.deleted_at.is_(None),
-            )
+        agg_query = select(
+            func.count(LibraryFile.id),
+            func.max(func.coalesce(LibraryFile.fs_modified_at, LibraryFile.updated_at)),
+        ).where(
+            LibraryFile.folder_id == folder.id,
+            LibraryFile.deleted_at.is_(None),
         )
+        if user is not None and not can_read_all:
+            agg_query = agg_query.where(LibraryFile.created_by_id == user.id)
+        agg_result = await db.execute(agg_query)
         file_count, latest_file = agg_result.one()
         file_count = file_count or 0
         own_activity = folder.fs_modified_at or folder.updated_at
@@ -1157,16 +1181,17 @@ async def get_folders_by_archive(
 async def create_folder(
     data: FolderCreate,
     db: AsyncSession = Depends(get_db),
-    _: User | None = Depends(require_permission_if_auth_enabled(Permission.LIBRARY_UPLOAD)),
+    current_user: User | None = Depends(require_permission_if_auth_enabled(Permission.LIBRARY_UPLOAD)),
 ):
-    """Create a new folder."""
-    # Verify parent exists if specified
+    """Create a folder owned by the authenticated user."""
     if data.parent_id is not None:
         parent_result = await db.execute(select(LibraryFolder).where(LibraryFolder.id == data.parent_id))
-        if not parent_result.scalar_one_or_none():
+        parent = parent_result.scalar_one_or_none()
+        if parent is None:
             raise HTTPException(status_code=404, detail="Parent folder not found")
+        if current_user is not None and not current_user.has_permission(Permission.LIBRARY_READ_ALL.value):
+            _ensure_library_folder_visible(parent, current_user, False)
 
-    # Verify project exists if specified
     project_name = None
     if data.project_id is not None:
         project_result = await db.execute(select(Project).where(Project.id == data.project_id))
@@ -1175,7 +1200,6 @@ async def create_folder(
             raise HTTPException(status_code=404, detail="Project not found")
         project_name = project.name
 
-    # Verify archive exists if specified
     archive_name = None
     if data.archive_id is not None:
         archive_result = await db.execute(select(PrintArchive).where(PrintArchive.id == data.archive_id))
@@ -1189,6 +1213,7 @@ async def create_folder(
         parent_id=data.parent_id,
         project_id=data.project_id,
         archive_id=data.archive_id,
+        created_by_id=current_user.id if current_user else None,
     )
     db.add(folder)
     await db.commit()
@@ -1207,8 +1232,6 @@ async def create_folder(
         external_readonly=folder.external_readonly,
         external_show_hidden=folder.external_show_hidden,
         file_count=0,
-        # New folder has no files yet — fall back to the folder's own
-        # updated_at so this matches the list-route semantics (#1770).
         latest_activity_at=folder.updated_at,
         created_at=folder.created_at,
         updated_at=folder.updated_at,
@@ -1219,14 +1242,15 @@ async def create_folder(
 async def get_folder(
     folder_id: int,
     db: AsyncSession = Depends(get_db),
-    _: tuple[User | None, bool] = Depends(
+    auth_result: tuple[User | None, bool] = Depends(
         require_ownership_permission(
             Permission.LIBRARY_READ_ALL,
             Permission.LIBRARY_READ_OWN,
         )
     ),
 ):
-    """Get a folder by ID."""
+    """Get a folder by ID within the caller's ownership scope."""
+    user, can_read_all = auth_result
     result = await db.execute(
         select(LibraryFolder, Project.name, PrintArchive.print_name)
         .outerjoin(Project, LibraryFolder.project_id == Project.id)
@@ -1234,22 +1258,22 @@ async def get_folder(
         .where(LibraryFolder.id == folder_id)
     )
     row = result.one_or_none()
-
-    if not row:
+    if row is None:
         raise HTTPException(status_code=404, detail="Folder not found")
 
     folder, project_name, archive_name = row
+    _ensure_library_folder_visible(folder, user, can_read_all)
 
-    # Get file count + latest file activity (#1770) in one trip
-    agg_result = await db.execute(
-        select(
-            func.count(LibraryFile.id),
-            func.max(LibraryFile.updated_at),
-        ).where(
-            LibraryFile.folder_id == folder_id,
-            LibraryFile.deleted_at.is_(None),
-        )
+    agg_query = select(
+        func.count(LibraryFile.id),
+        func.max(LibraryFile.updated_at),
+    ).where(
+        LibraryFile.folder_id == folder_id,
+        LibraryFile.deleted_at.is_(None),
     )
+    if user is not None and not can_read_all:
+        agg_query = agg_query.where(LibraryFile.created_by_id == user.id)
+    agg_result = await db.execute(agg_query)
     file_count, latest_file = agg_result.one()
     file_count = file_count or 0
     latest_activity_at = max(folder.updated_at, latest_file) if latest_file is not None else folder.updated_at
@@ -1296,9 +1320,9 @@ async def get_folder_readme(
     """
     user, can_read_all = auth_result
 
-    folder_row = await db.execute(select(LibraryFolder.id).where(LibraryFolder.id == folder_id))
-    if folder_row.scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="Folder not found")
+    folder_row = await db.execute(select(LibraryFolder).where(LibraryFolder.id == folder_id))
+    folder = folder_row.scalar_one_or_none()
+    _ensure_library_folder_visible(folder, user, can_read_all)
 
     query = LibraryFile.active().where(
         LibraryFile.folder_id == folder_id,

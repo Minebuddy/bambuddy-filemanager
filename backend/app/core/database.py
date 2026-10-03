@@ -1824,6 +1824,19 @@ async def run_migrations(conn):
     """
     from sqlalchemy import text
 
+    # Migration: add ownership tracking to library folders (#3201). Fresh
+    # installs get this from the ORM model; upgraded installs need the nullable
+    # FK added in place. Existing rows intentionally remain NULL because the
+    # historical creator cannot be determined reliably.
+    await _safe_execute(
+        conn,
+        "ALTER TABLE library_folders ADD COLUMN created_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL",
+    )
+    await _safe_execute(
+        conn,
+        "CREATE INDEX IF NOT EXISTS ix_library_folders_created_by_id ON library_folders (created_by_id)",
+    )
+
     # Existing PostgreSQL databases predate the finance ORM tables. These must
     # exist before any ALTER TABLE / CREATE INDEX statements below reference
     # them. Fresh installs remain idempotent because create_all() runs first.

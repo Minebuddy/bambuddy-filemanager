@@ -1053,6 +1053,141 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
         assert stranger.status_code == 404
 
     # ========================================================================
+    # Folder ownership / visibility (#3201)
+    # ========================================================================
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_operator_lists_only_owned_library_folders(
+        self, async_client: AsyncClient, auth_setup, library_folder_factory
+    ):
+        own = await library_folder_factory(
+            name="OwnFolder",
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+        await library_folder_factory(
+            name="OtherFolder",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+        await library_folder_factory(name="LegacyOwnerless")
+
+        response = await async_client.get(
+            "/api/v1/library/folders",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 200
+        assert {folder["id"] for folder in response.json()} == {own.id}
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_admin_lists_all_library_folders(
+        self, async_client: AsyncClient, auth_setup, library_folder_factory
+    ):
+        own = await library_folder_factory(
+            name="OperatorFolder",
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+        other = await library_folder_factory(
+            name="OtherOperatorFolder",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+        legacy = await library_folder_factory(name="LegacyOwnerless")
+
+        response = await async_client.get(
+            "/api/v1/library/folders",
+            headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+        )
+
+        assert response.status_code == 200
+        assert {folder["id"] for folder in response.json()} >= {own.id, other.id, legacy.id}
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_operator_folder_count_only_includes_owned_files(
+        self, async_client: AsyncClient, auth_setup, library_folder_factory, library_file_factory
+    ):
+        folder = await library_folder_factory(
+            name="MixedContents",
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+        await library_file_factory(
+            folder_id=folder.id,
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+        await library_file_factory(
+            folder_id=folder.id,
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+
+        response = await async_client.get(
+            "/api/v1/library/folders",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 200
+        item = next(item for item in response.json() if item["id"] == folder.id)
+        assert item["file_count"] == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_operator_get_other_users_folder_returns_404(
+        self, async_client: AsyncClient, auth_setup, library_folder_factory
+    ):
+        folder = await library_folder_factory(
+            name="PrivateOtherFolder",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+
+        response = await async_client.get(
+            f"/api/v1/library/folders/{folder.id}",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_create_folder_records_authenticated_owner(
+        self, async_client: AsyncClient, auth_setup, db_session
+    ):
+        from sqlalchemy import select
+
+        from backend.app.models.library import LibraryFolder
+
+        response = await async_client.post(
+            "/api/v1/library/folders",
+            json={"name": "MyOwnedFolder"},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 200
+        folder_id = response.json()["id"]
+        db_session.expire_all()
+        folder = (
+            await db_session.execute(select(LibraryFolder).where(LibraryFolder.id == folder_id))
+        ).scalar_one()
+        assert folder.created_by_id == auth_setup["operator_user"]["id"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_operator_cannot_create_child_in_other_users_folder(
+        self, async_client: AsyncClient, auth_setup, library_folder_factory
+    ):
+        parent = await library_folder_factory(
+            name="OtherParent",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+
+        response = await async_client.post(
+            "/api/v1/library/folders",
+            json={"name": "SneakyChild", "parent_id": parent.id},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 404
+
+    # ========================================================================
     # Folder deletion (#1781): folders have no ownership tracking, so users
     # with only library:delete_own may delete empty, non-external, non-linked
     # folders. Everything else still requires library:delete_all.
