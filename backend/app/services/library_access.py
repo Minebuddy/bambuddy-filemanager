@@ -43,9 +43,10 @@ async def _user_group_ids(db: AsyncSession, user_id: int) -> set[int]:
 async def folder_access_roles(db: AsyncSession, user: User) -> dict[int, str]:
     """Return every folder accessible to a user and its strongest role.
 
-    Ownership is manager access on that exact folder. Shares inherit down the
-    folder tree. Ownership itself does not inherit. When multiple direct or
-    inherited user/group shares apply, the strongest role wins.
+    Ownership is manager access on a folder and its descendants. Shares also
+    inherit down the folder tree. This preserves the parent owner's authority
+    when a contributor creates a child folder with their own created_by_id.
+    When multiple ownership/user/group paths apply, the strongest role wins.
     """
 
     folder_rows = (
@@ -104,16 +105,19 @@ async def folder_access_roles(db: AsyncSession, user: User) -> dict[int, str]:
             if parent_id is not None and parent_id in parents
             else None
         )
-        result = stronger_role(parent_role, direct_share_roles.get(folder_id))
+        owner_role = "manager" if owners.get(folder_id) == user.id else None
+        result = stronger_role(
+            parent_role,
+            direct_share_roles.get(folder_id),
+            owner_role,
+        )
         visiting.remove(folder_id)
         inherited_cache[folder_id] = result
         return result
 
     effective: dict[int, str] = {}
     for folder_id in parents:
-        share_role = inherited_share_role(folder_id, set())
-        owner_role = "manager" if owners.get(folder_id) == user.id else None
-        role = stronger_role(owner_role, share_role)
+        role = inherited_share_role(folder_id, set())
         if role is not None:
             effective[folder_id] = role
 
