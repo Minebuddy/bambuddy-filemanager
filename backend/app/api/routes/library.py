@@ -1006,8 +1006,12 @@ async def list_folders(
         .outerjoin(Project, LibraryFolder.project_id == Project.id)
         .outerjoin(PrintArchive, LibraryFolder.archive_id == PrintArchive.id)
     )
+    visible_folder_ids: set[int] | None = None
     if user is not None and not can_read_all:
-        folder_query = folder_query.where(LibraryFolder.created_by_id == user.id)
+        visible_folder_ids = await accessible_folder_ids(db, user, "viewer")
+        if not visible_folder_ids:
+            return []
+        folder_query = folder_query.where(LibraryFolder.id.in_(visible_folder_ids))
 
     result = await db.execute(folder_query.order_by(LibraryFolder.name))
     rows = result.all()
@@ -1019,8 +1023,10 @@ async def list_folders(
         .where(LibraryFile.folder_id.isnot(None), LibraryFile.deleted_at.is_(None))
         .group_by(LibraryFile.folder_id)
     )
-    if user is not None and not can_read_all:
-        file_counts_query = file_counts_query.where(LibraryFile.created_by_id == user.id)
+    if visible_folder_ids is not None:
+        file_counts_query = file_counts_query.where(
+            LibraryFile.folder_id.in_(visible_folder_ids)
+        )
     file_counts_result = await db.execute(file_counts_query)
     file_counts = dict(file_counts_result.all())
 
@@ -1032,8 +1038,10 @@ async def list_folders(
         .where(LibraryFile.folder_id.isnot(None), LibraryFile.deleted_at.is_(None))
         .group_by(LibraryFile.folder_id)
     )
-    if user is not None and not can_read_all:
-        latest_file_activity_query = latest_file_activity_query.where(LibraryFile.created_by_id == user.id)
+    if visible_folder_ids is not None:
+        latest_file_activity_query = latest_file_activity_query.where(
+            LibraryFile.folder_id.in_(visible_folder_ids)
+        )
     latest_file_activity_result = await db.execute(latest_file_activity_query)
     latest_file_activity = dict(latest_file_activity_result.all())
 
@@ -1114,7 +1122,10 @@ async def get_folders_by_project(
         .where(LibraryFolder.project_id == project_id)
     )
     if user is not None and not can_read_all:
-        folder_query = folder_query.where(LibraryFolder.created_by_id == user.id)
+        visible_folder_ids = await accessible_folder_ids(db, user, "viewer")
+        if not visible_folder_ids:
+            return []
+        folder_query = folder_query.where(LibraryFolder.id.in_(visible_folder_ids))
 
     result = await db.execute(folder_query.order_by(LibraryFolder.name))
     rows = result.all()
@@ -1128,8 +1139,6 @@ async def get_folders_by_project(
             LibraryFile.folder_id == folder.id,
             LibraryFile.deleted_at.is_(None),
         )
-        if user is not None and not can_read_all:
-            agg_query = agg_query.where(LibraryFile.created_by_id == user.id)
         agg_result = await db.execute(agg_query)
         file_count, latest_file = agg_result.one()
         file_count = file_count or 0
@@ -1178,7 +1187,10 @@ async def get_folders_by_archive(
         .where(LibraryFolder.archive_id == archive_id)
     )
     if user is not None and not can_read_all:
-        folder_query = folder_query.where(LibraryFolder.created_by_id == user.id)
+        visible_folder_ids = await accessible_folder_ids(db, user, "viewer")
+        if not visible_folder_ids:
+            return []
+        folder_query = folder_query.where(LibraryFolder.id.in_(visible_folder_ids))
 
     result = await db.execute(folder_query.order_by(LibraryFolder.name))
     rows = result.all()
@@ -1192,8 +1204,6 @@ async def get_folders_by_archive(
             LibraryFile.folder_id == folder.id,
             LibraryFile.deleted_at.is_(None),
         )
-        if user is not None and not can_read_all:
-            agg_query = agg_query.where(LibraryFile.created_by_id == user.id)
         agg_result = await db.execute(agg_query)
         file_count, latest_file = agg_result.one()
         file_count = file_count or 0
@@ -1319,8 +1329,6 @@ async def get_folder(
         LibraryFile.folder_id == folder_id,
         LibraryFile.deleted_at.is_(None),
     )
-    if user is not None and not can_read_all:
-        agg_query = agg_query.where(LibraryFile.created_by_id == user.id)
     agg_result = await db.execute(agg_query)
     file_count, latest_file = agg_result.one()
     file_count = file_count or 0
@@ -1377,8 +1385,6 @@ async def get_folder_readme(
         LibraryFile.folder_id == folder_id,
         func.lower(LibraryFile.filename).like("%.md"),
     )
-    if user is not None and not can_read_all:
-        query = query.where(LibraryFile.created_by_id == user.id)
     result = await db.execute(query)
     candidates = result.scalars().all()
     if not candidates:
@@ -2509,8 +2515,26 @@ async def list_files(
         selectinload(LibraryFile.created_by),
         selectinload(LibraryFile.tags),
     )
+    visible_folder_ids: set[int] | None = None
     if user is not None and not can_read_all:
-        query = query.where(LibraryFile.created_by_id == user.id)
+        visible_folder_ids = await accessible_folder_ids(db, user, "viewer")
+        visibility_conditions = [LibraryFile.created_by_id == user.id]
+        if visible_folder_ids:
+            visibility_conditions.append(
+                LibraryFile.folder_id.in_(visible_folder_ids)
+            )
+        query = query.where(or_(*visibility_conditions))
+
+        if folder_id is not None and folder_id not in visible_folder_ids:
+            folder_result = await db.execute(
+                select(LibraryFolder).where(LibraryFolder.id == folder_id)
+            )
+            await _ensure_library_folder_visible(
+                db,
+                folder_result.scalar_one_or_none(),
+                user,
+                False,
+            )
 
     if tag_ids:
         # Cross-cutting filter — every requested tag must be present on the
