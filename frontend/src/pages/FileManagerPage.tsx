@@ -1069,6 +1069,7 @@ interface FileCardProps {
   onTagClick?: (tagId: number) => void;
   thumbnailVersion?: number;
   hasPermission: (permission: Permission) => boolean;
+  canReadLibrary: boolean;
   canModify: (
     resource: 'queue' | 'archives' | 'library',
     action: 'update' | 'delete' | 'reprint',
@@ -1080,7 +1081,7 @@ interface FileCardProps {
   t: TFunction;
 }
 
-function FileCard({ file, isSelected, onSelect, onDelete, onDownload, onPrint, onSlice, onOpenInSlicer, onRunPipeline, useSlicerApi, desktopSlicer, canSlice, onPreview, onRename, onDetails, onGenerateThumbnail, onTagClick, thumbnailVersion, hasPermission, canModify, authEnabled, showModified, t }: FileCardProps) {
+function FileCard({ file, isSelected, onSelect, onDelete, onDownload, onPrint, onSlice, onOpenInSlicer, onRunPipeline, useSlicerApi, desktopSlicer, canSlice, onPreview, onRename, onDetails, onGenerateThumbnail, onTagClick, thumbnailVersion, hasPermission, canReadLibrary, canModify, authEnabled, showModified, t }: FileCardProps) {
   // Viewport coordinates rather than a flag, because the menu is rendered by
   // `ContextMenu` at `position: fixed` and anchored to the button (#2846). The
   // card it belongs to is only ~270px tall for a bare STL, which is shorter
@@ -1088,7 +1089,7 @@ function FileCard({ file, isSelected, onSelect, onDelete, onDownload, onPrint, o
   // top entry -- Slice -- cut off. The archive card menu works the same way.
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number } | null>(null);
 
-  const canPreview3d = hasPermission('library:read');
+  const canPreview3d = canReadLibrary;
   const canRename = canModify('library', 'update', file.created_by_id, file.access_role);
   const canDelete = canModify('library', 'delete', file.created_by_id, file.access_role);
 
@@ -1136,8 +1137,8 @@ function FileCard({ file, isSelected, onSelect, onDelete, onDownload, onPrint, o
     label: t('common.download'),
     icon: <Download className="w-4 h-4" />,
     onClick: () => onDownload(file.id),
-    disabled: !hasPermission('library:read'),
-    title: !hasPermission('library:read') ? t('fileManager.noPermissionDownload') : undefined,
+    disabled: !canReadLibrary,
+    title: !canReadLibrary ? t('fileManager.noPermissionDownload') : undefined,
   });
   if (onRename) {
     menuItems.push({
@@ -1380,6 +1381,7 @@ interface FileActionStripProps {
   thumbnailPending: boolean;
   onDelete: (id: number) => void;
   hasPermission: (permission: Permission) => boolean;
+  canReadLibrary: boolean;
   canModify: (
     resource: 'queue' | 'archives' | 'library',
     action: 'update' | 'delete' | 'reprint',
@@ -1392,7 +1394,7 @@ interface FileActionStripProps {
   t: TFunction;
 }
 
-function FileActionStrip({ file, onPrint, onSlice, onOpenInSlicer, onRunPipeline, useSlicerApi, desktopSlicer, canSlice, onPreview, onDetails, onDownload, onRename, onGenerateThumbnail, thumbnailPending, onDelete, hasPermission, canModify, tabIndex, t }: FileActionStripProps) {
+function FileActionStrip({ file, onPrint, onSlice, onOpenInSlicer, onRunPipeline, useSlicerApi, desktopSlicer, canSlice, onPreview, onDetails, onDownload, onRename, onGenerateThumbnail, thumbnailPending, onDelete, hasPermission, canReadLibrary, canModify, tabIndex, t }: FileActionStripProps) {
   const canRename = canModify('library', 'update', file.created_by_id, file.access_role);
   const canDelete = canModify('library', 'delete', file.created_by_id, file.access_role);
   return (
@@ -1448,14 +1450,14 @@ function FileActionStrip({ file, onPrint, onSlice, onOpenInSlicer, onRunPipeline
       {isModelPreview(file) && (
         <button
           tabIndex={tabIndex}
-          onClick={() => hasPermission('library:read') && onPreview(file)}
+          onClick={() => canReadLibrary && onPreview(file)}
           className={`p-1.5 rounded transition-colors ${
-            hasPermission('library:read')
+            canReadLibrary
               ? 'hover:bg-bambu-dark text-bambu-gray hover:text-bambu-green'
               : 'text-bambu-gray/50 cursor-not-allowed'
           }`}
-          title={hasPermission('library:read') ? t('fileManager.preview3d') : t('fileManager.noPermissionPreview')}
-          disabled={!hasPermission('library:read')}
+          title={canReadLibrary ? t('fileManager.preview3d') : t('fileManager.noPermissionPreview')}
+          disabled={!canReadLibrary}
         >
           <Box className="w-4 h-4" />
         </button>
@@ -1463,41 +1465,41 @@ function FileActionStrip({ file, onPrint, onSlice, onOpenInSlicer, onRunPipeline
       {!isModelPreview(file) && isPreviewableLibraryFile(file) && (
         <button
           tabIndex={tabIndex}
-          onClick={() => hasPermission('library:read') && onPreview(file)}
+          onClick={() => canReadLibrary && onPreview(file)}
           className={`p-1.5 rounded transition-colors ${
-            hasPermission('library:read')
+            canReadLibrary
               ? 'hover:bg-bambu-dark text-bambu-gray hover:text-bambu-green'
               : 'text-bambu-gray/50 cursor-not-allowed'
           }`}
-          title={hasPermission('library:read') ? t('fileManager.preview.open') : t('fileManager.noPermissionPreview')}
-          disabled={!hasPermission('library:read')}
+          title={canReadLibrary ? t('fileManager.preview.open') : t('fileManager.noPermissionPreview')}
+          disabled={!canReadLibrary}
         >
           {documentPreviewIcon(file.file_type)}
         </button>
       )}
       <button
         tabIndex={tabIndex}
-        onClick={() => hasPermission('library:read') && onDownload(file.id)}
+        onClick={() => canReadLibrary && onDownload(file.id)}
         className={`p-1.5 rounded transition-colors ${
-          hasPermission('library:read')
+          canReadLibrary
             ? 'hover:bg-bambu-dark text-bambu-gray hover:text-white'
             : 'text-bambu-gray/50 cursor-not-allowed'
         }`}
-        title={hasPermission('library:read') ? t('common.download') : t('fileManager.noPermissionDownload')}
-        disabled={!hasPermission('library:read')}
+        title={canReadLibrary ? t('common.download') : t('fileManager.noPermissionDownload')}
+        disabled={!canReadLibrary}
       >
         <Download className="w-4 h-4" />
       </button>
       <button
         tabIndex={tabIndex}
-        onClick={() => hasPermission('library:read') && onDetails(file)}
+        onClick={() => canReadLibrary && onDetails(file)}
         className={`p-1.5 rounded transition-colors ${
-          hasPermission('library:read')
+          canReadLibrary
             ? 'hover:bg-bambu-dark text-bambu-gray hover:text-white'
             : 'text-bambu-gray/50 cursor-not-allowed'
         }`}
-        title={hasPermission('library:read') ? t('fileManager.details.title') : t('fileManager.noPermissionPreview')}
-        disabled={!hasPermission('library:read')}
+        title={canReadLibrary ? t('fileManager.details.title') : t('fileManager.noPermissionPreview')}
+        disabled={!canReadLibrary}
       >
         <Info className="w-4 h-4" />
       </button>
@@ -1624,6 +1626,7 @@ export function FileManagerPage() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const { user, hasPermission, hasAnyPermission, canModify, authEnabled, isAdmin } = useAuth();
+  const canReadLibrary = hasAnyPermission('library:read', 'library:read_own', 'library:read_all');
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
@@ -2193,7 +2196,7 @@ export function FileManagerPage() {
   // uses; everything else opens the modal for its type. A file with no
   // preview does nothing.
   const openPreview = useCallback((file: LibraryFileListItem) => {
-    if (!hasPermission('library:read')) return;
+    if (!canReadLibrary) return;
     if (isSlicedLibraryFile(file)) {
       navigate(`/gcode-viewer?library_file=${file.id}`);
     } else if (file.file_type === '3mf' || file.file_type === 'stl' || isStepType(file.file_type)) {
@@ -2205,7 +2208,7 @@ export function FileManagerPage() {
     } else if (isPreviewableImageType(file.file_type)) {
       setImagePreviewFile(file);
     }
-  }, [hasPermission, navigate]);
+  }, [canReadLibrary, navigate]);
 
   // Handlers
   const handleFileSelect = useCallback((id: number) => {
@@ -2341,6 +2344,7 @@ export function FileManagerPage() {
     thumbnailPending: singleThumbnailMutation.isPending,
     onDelete: (id: number) => setDeleteConfirm({ type: 'file', id }),
     hasPermission,
+    canReadLibrary,
     canModify: canModifyWithAccess,
     t,
   };
@@ -3345,8 +3349,8 @@ export function FileManagerPage() {
                         variant="secondary"
                         size="sm"
                         onClick={() => openPreview(previewSelection)}
-                        disabled={!hasPermission('library:read')}
-                        title={!hasPermission('library:read') ? t('fileManager.noPermissionPreview') : undefined}
+                        disabled={!canReadLibrary}
+                        title={!canReadLibrary ? t('fileManager.noPermissionPreview') : undefined}
                       >
                         <Eye className="w-4 h-4 sm:mr-1" />
                         <span className="hidden sm:inline">{t('fileManager.preview.open')}</span>
