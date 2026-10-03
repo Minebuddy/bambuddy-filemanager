@@ -2376,6 +2376,8 @@ async def upload_file(
             target_folder = folder_result.scalar_one_or_none()
             if not target_folder:
                 raise HTTPException(status_code=404, detail="Folder not found")
+            if current_user is not None and not current_user.has_permission(Permission.LIBRARY_READ_ALL.value):
+                _ensure_library_folder_visible(target_folder, current_user, False)
 
         # Writable external folders write through to the mount so the file is
         # visible outside Bambuddy (#1112); everything else lands under the
@@ -5341,8 +5343,11 @@ async def update_file(
         else:
             # Verify folder exists
             folder_result = await db.execute(select(LibraryFolder).where(LibraryFolder.id == data.folder_id))
-            if not folder_result.scalar_one_or_none():
+            destination = folder_result.scalar_one_or_none()
+            if destination is None:
                 raise HTTPException(status_code=404, detail="Folder not found")
+            if not can_modify_all:
+                _ensure_library_folder_visible(destination, user, False)
             file.folder_id = data.folder_id
 
     if data.project_id is not None:
@@ -5890,6 +5895,8 @@ async def move_files(
         target_folder = folder_result.scalar_one_or_none()
         if not target_folder:
             raise HTTPException(status_code=404, detail="Folder not found")
+        if not can_modify_all:
+            _ensure_library_folder_visible(target_folder, user, False)
         if target_folder.is_external and target_folder.external_readonly:
             raise HTTPException(status_code=403, detail="Cannot move files to a read-only external folder")
 
