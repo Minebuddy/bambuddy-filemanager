@@ -1368,57 +1368,66 @@ async def update_folder(
     folder_id: int,
     data: FolderUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User | None = Depends(require_permission_if_auth_enabled(Permission.LIBRARY_UPDATE_ALL)),
+    auth_result: tuple[User | None, bool] = Depends(
+        require_ownership_permission(
+            Permission.LIBRARY_UPDATE_ALL,
+            Permission.LIBRARY_UPDATE_OWN,
+        )
+    ),
 ):
-    """Update a folder.
-
-    Note: Folders require library:update_all permission since they don't have
-    ownership tracking.
-    """
+    """Update a folder within the caller's ownership scope."""
+    user, can_modify_all = auth_result
     result = await db.execute(select(LibraryFolder).where(LibraryFolder.id == folder_id))
     folder = result.scalar_one_or_none()
 
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
+    if not can_modify_all:
+        _ensure_library_folder_visible(folder, user, False)
 
     if data.name is not None:
         folder.name = data.name
 
     if data.parent_id is not None:
-        # Prevent circular reference
         if data.parent_id == folder_id:
             raise HTTPException(status_code=400, detail="Folder cannot be its own parent")
 
-        # Check for circular reference in ancestors
-        if data.parent_id != 0:  # 0 means move to root
+        if data.parent_id != 0:
+            destination_result = await db.execute(
+                select(LibraryFolder).where(LibraryFolder.id == data.parent_id)
+            )
+            destination = destination_result.scalar_one_or_none()
+            if destination is None:
+                raise HTTPException(status_code=404, detail="Parent folder not found")
+            if not can_modify_all:
+                _ensure_library_folder_visible(destination, user, False)
+
             current_id = data.parent_id
             while current_id is not None:
                 if current_id == folder_id:
                     raise HTTPException(status_code=400, detail="Cannot move folder into its own subtree")
-                parent_result = await db.execute(select(LibraryFolder.parent_id).where(LibraryFolder.id == current_id))
+                parent_result = await db.execute(
+                    select(LibraryFolder.parent_id).where(LibraryFolder.id == current_id)
+                )
                 current_id = parent_result.scalar()
 
             folder.parent_id = data.parent_id
         else:
             folder.parent_id = None
 
-    # Update project_id (0 to unlink)
     if data.project_id is not None:
         if data.project_id == 0:
             folder.project_id = None
         else:
-            # Verify project exists
             project_result = await db.execute(select(Project).where(Project.id == data.project_id))
             if not project_result.scalar_one_or_none():
                 raise HTTPException(status_code=404, detail="Project not found")
             folder.project_id = data.project_id
 
-    # Update archive_id (0 to unlink)
     if data.archive_id is not None:
         if data.archive_id == 0:
             folder.archive_id = None
         else:
-            # Verify archive exists
             archive_result = await db.execute(select(PrintArchive).where(PrintArchive.id == data.archive_id))
             if not archive_result.scalar_one_or_none():
                 raise HTTPException(status_code=404, detail="Archive not found")
@@ -1427,21 +1436,20 @@ async def update_folder(
     await db.commit()
     await db.refresh(folder)
 
-    # Get file count + latest file activity (#1770) and names
-    agg_result = await db.execute(
-        select(
-            func.count(LibraryFile.id),
-            func.max(LibraryFile.updated_at),
-        ).where(
-            LibraryFile.folder_id == folder_id,
-            LibraryFile.deleted_at.is_(None),
-        )
+    agg_query = select(
+        func.count(LibraryFile.id),
+        func.max(LibraryFile.updated_at),
+    ).where(
+        LibraryFile.folder_id == folder_id,
+        LibraryFile.deleted_at.is_(None),
     )
+    if user is not None and not can_modify_all:
+        agg_query = agg_query.where(LibraryFile.created_by_id == user.id)
+    agg_result = await db.execute(agg_query)
     file_count, latest_file = agg_result.one()
     file_count = file_count or 0
     latest_activity_at = max(folder.updated_at, latest_file) if latest_file is not None else folder.updated_at
 
-    # Get project and archive names
     project_name = None
     archive_name = None
     if folder.project_id:
@@ -1470,28 +1478,51 @@ async def update_folder(
     )
 
 
-async def _restricted_folder_delete_blocker(db: AsyncSession, folder: LibraryFolder) -> str | None:
-    """Why a library:delete_own user may NOT delete this folder, or None if they may.
+async def _restricted_owned_folder_delete_blocker(
+    db: AsyncSession,
+    folder: LibraryFolder,
+    user: User,
+) -> str | None:
+    """Return why an own-scoped caller may not cascade-delete this folder.
 
-    Folders have no ownership tracking, so users without library:delete_all may
-    only delete folders that are truly empty — an empty folder contains nobody's
-    data (#1781). "Empty" must include trashed files: LibraryFile.folder_id
-    cascades on folder delete, so a folder holding another user's trashed file
-    would silently break trash restore.
+    The root folder, every descendant folder and every contained file (including
+    trashed files) must belong to the caller. This prevents an owned parent from
+    becoming a way to cascade-delete another user's rows.
     """
+    if folder.created_by_id != user.id:
+        return "Folder is not owned by the current user"
     if folder.is_external:
         return "External folders can only be deleted by users with library:delete_all"
     if folder.project_id is not None or folder.archive_id is not None:
         return "Folders linked to a project or archive can only be deleted by users with library:delete_all"
 
-    child_result = await db.execute(select(func.count(LibraryFolder.id)).where(LibraryFolder.parent_id == folder.id))
-    if (child_result.scalar() or 0) > 0:
-        return "Only empty folders can be deleted without library:delete_all"
+    folder_ids = [folder.id]
+    queue = [folder.id]
+    while queue:
+        parent_id = queue.pop()
+        children_result = await db.execute(
+            select(
+                LibraryFolder.id,
+                LibraryFolder.created_by_id,
+                LibraryFolder.is_external,
+                LibraryFolder.project_id,
+                LibraryFolder.archive_id,
+            ).where(LibraryFolder.parent_id == parent_id)
+        )
+        for child_id, owner_id, is_external, project_id, archive_id in children_result.all():
+            if owner_id != user.id:
+                return "Folder tree contains a subfolder owned by another user"
+            if is_external or project_id is not None or archive_id is not None:
+                return "Folder tree contains a protected external or linked subfolder"
+            folder_ids.append(child_id)
+            queue.append(child_id)
 
-    # Includes trashed files (no deleted_at filter) — see docstring.
-    file_result = await db.execute(select(func.count(LibraryFile.id)).where(LibraryFile.folder_id == folder.id))
-    if (file_result.scalar() or 0) > 0:
-        return "Only empty folders can be deleted without library:delete_all (the folder may contain trashed files)"
+    files_result = await db.execute(
+        select(LibraryFile.id, LibraryFile.created_by_id).where(LibraryFile.folder_id.in_(folder_ids))
+    )
+    for _, owner_id in files_result.all():
+        if owner_id != user.id:
+            return "Folder tree contains a file not owned by the current user"
 
     return None
 
@@ -1507,13 +1538,8 @@ async def delete_folder(
         )
     ),
 ):
-    """Delete a folder and all its contents (cascade).
-
-    Folders have no ownership tracking, so cascade deletion requires
-    library:delete_all. Users with only library:delete_own may delete empty,
-    non-external, non-linked folders (#1781).
-    """
-    _, can_modify_all = auth_result
+    """Delete a folder and its subtree within the caller's ownership scope."""
+    user, can_modify_all = auth_result
     result = await db.execute(select(LibraryFolder).where(LibraryFolder.id == folder_id))
     folder = result.scalar_one_or_none()
 
@@ -1521,19 +1547,18 @@ async def delete_folder(
         raise HTTPException(status_code=404, detail="Folder not found")
 
     if not can_modify_all:
-        blocker = await _restricted_folder_delete_blocker(db, folder)
+        if user is None:
+            raise HTTPException(status_code=403, detail="Folder ownership required")
+        blocker = await _restricted_owned_folder_delete_blocker(db, folder, user)
         if blocker:
             raise HTTPException(status_code=403, detail=blocker)
 
-    # External folders: only remove DB records, never delete files from external path
     is_ext = folder.is_external
 
-    # Get all files in this folder and subfolders to delete from disk
     async def get_all_file_ids(fid: int) -> list[int]:
         """Recursively get all file IDs in a folder tree."""
         file_ids = []
 
-        # Get files in this folder
         files_result = await db.execute(
             select(LibraryFile.id, LibraryFile.file_path, LibraryFile.thumbnail_path, LibraryFile.is_external).where(
                 LibraryFile.folder_id == fid
@@ -1541,7 +1566,6 @@ async def delete_folder(
         )
         for fid_val, file_path, thumb_path, file_is_ext in files_result.all():
             file_ids.append(fid_val)
-            # Only delete non-external files from disk
             if not is_ext and not file_is_ext:
                 try:
                     if file_path and os.path.exists(file_path):
@@ -1551,7 +1575,6 @@ async def delete_folder(
                 except OSError as e:
                     logger.warning("Failed to delete file: %s", e)
 
-        # Get child folders and recurse
         children_result = await db.execute(select(LibraryFolder.id).where(LibraryFolder.parent_id == fid))
         for (child_id,) in children_result.all():
             file_ids.extend(await get_all_file_ids(child_id))
@@ -1560,10 +1583,6 @@ async def delete_folder(
 
     doomed_file_ids = await get_all_file_ids(folder_id)
 
-    # The folder cascade hard-deletes every file row under it, so the queue has
-    # to be taken off them first — same as the single-file delete below (#2819).
-    # The return value used to be discarded here, which is why this never
-    # happened for a folder delete.
     from backend.app.services.library_trash import delete_dependent_variants, release_queue_references
 
     await delete_dependent_variants(db, doomed_file_ids)
@@ -1571,7 +1590,6 @@ async def delete_folder(
     for doomed_id in doomed_file_ids:
         remove_library_photos_dir(doomed_id)
 
-    # Delete folder (cascade will handle files and subfolders)
     await db.delete(folder)
     await db.commit()
 
