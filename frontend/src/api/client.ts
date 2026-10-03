@@ -8332,7 +8332,7 @@ export interface LibraryFolderTree {
   id: number;
   name: string;
   parent_id: number | null;
-  created_by_id: number | null;
+  created_by_id?: number | null;
   project_id: number | null;
   archive_id: number | null;
   project_name: string | null;
@@ -8351,7 +8351,7 @@ export interface LibraryFolder {
   id: number;
   name: string;
   parent_id: number | null;
-  created_by_id: number | null;
+  created_by_id?: number | null;
   project_id: number | null;
   archive_id: number | null;
   project_name: string | null;

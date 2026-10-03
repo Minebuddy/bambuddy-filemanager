@@ -1374,7 +1374,7 @@ async def update_folder_owner(
     folder_id: int,
     data: FolderOwnerUpdate,
     db: AsyncSession = Depends(get_db),
-    _admin: User | None = Depends(RequireAdminIfAuthEnabled()),
+    _admin: User | None = RequireAdminIfAuthEnabled(),
 ):
     """Admin-only assignment or clearing of internal folder ownership.
 
