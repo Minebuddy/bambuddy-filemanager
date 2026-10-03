@@ -56,20 +56,13 @@ async def _folder(conn, folder_id: int, *, parent_id=None, external=False, owner
 
 async def _file(conn, file_id: int, folder_id: int, owner):
     await conn.execute(
-        text(
-            "INSERT INTO library_files (id, folder_id, created_by_id) "
-            "VALUES (:id, :folder_id, :owner)"
-        ),
+        text("INSERT INTO library_files (id, folder_id, created_by_id) VALUES (:id, :folder_id, :owner)"),
         {"id": file_id, "folder_id": folder_id, "owner": owner},
     )
 
 
 async def _owners(conn) -> dict[int, int | None]:
-    rows = (
-        await conn.execute(
-            text("SELECT id, created_by_id FROM library_folders ORDER BY id")
-        )
-    ).fetchall()
+    rows = (await conn.execute(text("SELECT id, created_by_id FROM library_folders ORDER BY id"))).fetchall()
     return {int(folder_id): owner for folder_id, owner in rows}
 
 

@@ -1831,23 +1831,13 @@ async def _migrate_library_folder_owners(conn) -> int:
     from sqlalchemy import text
 
     folder_rows = (
-        await conn.execute(
-            text(
-                "SELECT id, parent_id, is_external, created_by_id "
-                "FROM library_folders"
-            )
-        )
+        await conn.execute(text("SELECT id, parent_id, is_external, created_by_id FROM library_folders"))
     ).fetchall()
     if not folder_rows:
         return 0
 
     file_rows = (
-        await conn.execute(
-            text(
-                "SELECT folder_id, created_by_id "
-                "FROM library_files WHERE folder_id IS NOT NULL"
-            )
-        )
+        await conn.execute(text("SELECT folder_id, created_by_id FROM library_files WHERE folder_id IS NOT NULL"))
     ).fetchall()
 
     children: dict[int, list[int]] = defaultdict(list)
@@ -1877,9 +1867,7 @@ async def _migrate_library_folder_owners(conn) -> int:
     memo: dict[int, tuple[set[int], bool, bool]] = {}
     cycle_nodes: set[int] = set()
 
-    def subtree_evidence(
-        folder_id: int, visiting: set[int]
-    ) -> tuple[set[int], bool, bool]:
+    def subtree_evidence(folder_id: int, visiting: set[int]) -> tuple[set[int], bool, bool]:
         if folder_id in memo:
             owners, ownerless, has_file = memo[folder_id]
             return set(owners), ownerless, has_file
@@ -1893,9 +1881,7 @@ async def _migrate_library_folder_owners(conn) -> int:
         has_file = folder_id in has_any_file
 
         for child_id in children.get(folder_id, []):
-            child_owners, child_ownerless, child_has_file = subtree_evidence(
-                child_id, visiting
-            )
+            child_owners, child_ownerless, child_has_file = subtree_evidence(child_id, visiting)
             owners.update(child_owners)
             ownerless = ownerless or child_ownerless
             has_file = has_file or child_has_file
@@ -1910,16 +1896,12 @@ async def _migrate_library_folder_owners(conn) -> int:
             continue
         owners, ownerless, has_file = subtree_evidence(folder_id, set())
         if has_file and not ownerless and len(owners) == 1:
-            updates.append(
-                {"folder_id": folder_id, "owner_id": next(iter(owners))}
-            )
+            updates.append({"folder_id": folder_id, "owner_id": next(iter(owners))})
 
     if updates:
         await conn.execute(
             text(
-                "UPDATE library_folders "
-                "SET created_by_id = :owner_id "
-                "WHERE id = :folder_id AND created_by_id IS NULL"
+                "UPDATE library_folders SET created_by_id = :owner_id WHERE id = :folder_id AND created_by_id IS NULL"
             ),
             updates,
         )
