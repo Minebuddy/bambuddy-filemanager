@@ -1856,6 +1856,21 @@ export function FileManagerPage() {
     return sortLevel(folders);
   }, [folders, folderSortField, folderSortDirection]);
 
+  // Resolve the selected folder early so upload/create affordances can use
+  // its effective shared access role.
+  const selectedFolder = useMemo(() => {
+    if (!selectedFolderId || !folders) return null;
+    const findFolder = (items: LibraryFolderTree[]): LibraryFolderTree | null => {
+      for (const item of items) {
+        if (item.id === selectedFolderId) return item;
+        const found = findFolder(item.children);
+        if (found) return found;
+      }
+      return null;
+    };
+    return findFolder(folders);
+  }, [selectedFolderId, folders]);
+
   // Trash count for the header badge (#1008). Empty/error are silently treated
   // as zero so a broken trash endpoint doesn't break the File Manager.
   const { data: trashCount } = useQuery({
@@ -2249,7 +2264,13 @@ export function FileManagerPage() {
   // and also disabled while the upload modal itself is open so drags into
   // the modal's own drop zone don't bubble up and flash the page overlay
   // behind it.
-  const canUpload = hasPermission('library:upload');
+  const canContributeToSelectedFolder =
+    selectedFolderId === null ||
+    isAdmin ||
+    selectedFolder?.access_role === 'contributor' ||
+    selectedFolder?.access_role === 'manager';
+  const canUpload =
+    hasPermission('library:upload') && canContributeToSelectedFolder;
 
   const canModifyWithAccess = useCallback(
     (
@@ -2350,20 +2371,6 @@ export function FileManagerPage() {
   };
 
   const isLoading = foldersLoading || filesLoading;
-
-  // Find the selected folder in the tree to check external status
-  const selectedFolder = useMemo(() => {
-    if (!selectedFolderId || !folders) return null;
-    const findFolder = (items: LibraryFolderTree[]): LibraryFolderTree | null => {
-      for (const item of items) {
-        if (item.id === selectedFolderId) return item;
-        const found = findFolder(item.children);
-        if (found) return found;
-      }
-      return null;
-    };
-    return findFolder(folders);
-  }, [selectedFolderId, folders]);
 
   // The chain of folders from a top-level folder down to the selected one.
   // Selection is the single source of truth — clicking a folder anywhere just
@@ -2813,8 +2820,8 @@ export function FileManagerPage() {
           <Button
             variant="secondary"
             onClick={() => setShowNewFolderModal(true)}
-            disabled={!hasPermission('library:upload')}
-            title={!hasPermission('library:upload') ? t('fileManager.noPermissionCreateFolder') : undefined}
+            disabled={!canUpload}
+            title={!canUpload ? t('fileManager.noPermissionCreateFolder') : undefined}
           >
             <FolderPlus className="w-4 h-4 mr-2" />
             {t('fileManager.newFolder')}
@@ -2854,8 +2861,8 @@ export function FileManagerPage() {
           )}
           <Button
             onClick={() => setShowUploadModal(true)}
-            disabled={!hasPermission('library:upload')}
-            title={!hasPermission('library:upload') ? t('fileManager.noPermissionUpload') : undefined}
+            disabled={!canUpload}
+            title={!canUpload ? t('fileManager.noPermissionUpload') : undefined}
           >
             <Upload className="w-4 h-4 mr-2" />
             {t('common.upload')}
@@ -3396,7 +3403,7 @@ export function FileManagerPage() {
                         variant="secondary"
                         size="sm"
                         onClick={() => setShowCombineModal(true)}
-                        disabled={!hasPermission('library:upload')}
+                        disabled={!canUpload}
                         title={t('fileManager.combine.tooltip')}
                       >
                         <Combine className="w-4 h-4 sm:mr-1" />
