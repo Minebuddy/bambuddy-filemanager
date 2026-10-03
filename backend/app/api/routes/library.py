@@ -2926,10 +2926,18 @@ async def extract_zip_file(
             LibraryFolder.name == zip_folder_name,
             LibraryFolder.parent_id == folder_id if folder_id else LibraryFolder.parent_id.is_(None),
         )
-        if current_user is not None:
-            zip_folder_query = zip_folder_query.where(LibraryFolder.created_by_id == current_user.id)
-        else:
-            zip_folder_query = zip_folder_query.where(LibraryFolder.created_by_id.is_(None))
+        # Under an already-authorized parent, inherited contributor access
+        # makes every child in that subtree visible regardless of who created it.
+        # At the library root there is no shared parent, so preserve owner scope.
+        if folder_id is None:
+            if current_user is not None:
+                zip_folder_query = zip_folder_query.where(
+                    LibraryFolder.created_by_id == current_user.id
+                )
+            else:
+                zip_folder_query = zip_folder_query.where(
+                    LibraryFolder.created_by_id.is_(None)
+                )
         existing = await db.execute(zip_folder_query)
         existing_folder = existing.scalar_one_or_none()
         if existing_folder:
@@ -2989,14 +2997,19 @@ async def extract_zip_file(
                                         if current_parent
                                         else LibraryFolder.parent_id.is_(None),
                                     )
-                                    if current_user is not None:
-                                        nested_folder_query = nested_folder_query.where(
-                                            LibraryFolder.created_by_id == current_user.id
-                                        )
-                                    else:
-                                        nested_folder_query = nested_folder_query.where(
-                                            LibraryFolder.created_by_id.is_(None)
-                                        )
+                                    # current_parent is inside the authorized
+                                    # extraction subtree, so inherited access
+                                    # applies to existing children. Root remains
+                                    # owner-scoped because it has no share context.
+                                    if current_parent is None:
+                                        if current_user is not None:
+                                            nested_folder_query = nested_folder_query.where(
+                                                LibraryFolder.created_by_id == current_user.id
+                                            )
+                                        else:
+                                            nested_folder_query = nested_folder_query.where(
+                                                LibraryFolder.created_by_id.is_(None)
+                                            )
                                     existing = await db.execute(nested_folder_query)
                                     existing_folder = existing.scalar_one_or_none()
 
