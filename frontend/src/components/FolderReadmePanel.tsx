@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { FileText, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { FileText, Loader2, PanelRightClose, PanelRightOpen, User } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 
 import { api } from '../api/client';
+import { libraryOwnershipApi } from '../api/libraryOwnership';
+import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import remarkGfmNoAutolink from '../utils/remarkGfmNoAutolink';
 
 interface FolderReadmePanelProps {
@@ -29,6 +32,11 @@ const COLLAPSE_STORAGE_KEY = 'fileManager.readmeCollapsed';
  */
 export function FolderReadmePanel({ folderId }: FolderReadmePanelProps) {
   const { t } = useTranslation();
+  const { isAdmin } = useAuth();
+  const { showToast } = useToast();
+  const queryClient = useQueryClient();
+  const [selectedOwnerId, setSelectedOwnerId] = useState('');
+  const [recursiveOwnerUpdate, setRecursiveOwnerUpdate] = useState(false);
   const [collapsed, setCollapsed] = useState<boolean>(
     () => localStorage.getItem(COLLAPSE_STORAGE_KEY) === '1',
   );
@@ -44,7 +52,96 @@ export function FolderReadmePanel({ folderId }: FolderReadmePanelProps) {
     staleTime: 30_000,
   });
 
-  if (isLoading || error || !data) return null;
+  const {
+    data: folderOwner,
+    isLoading: ownerLoading,
+    error: ownerError,
+  } = useQuery({
+    queryKey: ['library-folder-owner', folderId],
+    queryFn: () => libraryOwnershipApi.getFolderOwner(folderId),
+    enabled: isAdmin,
+    retry: false,
+  });
+
+  const { data: users = [], isLoading: usersLoading } = useQuery({
+    queryKey: ['users-slim'],
+    queryFn: () => api.getUsersSlim(),
+    enabled: isAdmin,
+    staleTime: 30_000,
+  });
+
+  useEffect(() => {
+    if (!folderOwner) return;
+    setSelectedOwnerId(folderOwner.created_by_id === null ? '' : String(folderOwner.created_by_id));
+    setRecursiveOwnerUpdate(false);
+  }, [folderId, folderOwner]);
+
+  const ownerMutation = useMutation({
+    mutationFn: () =>
+      libraryOwnershipApi.updateFolderOwner(folderId, {
+        created_by_id: selectedOwnerId === '' ? null : Number(selectedOwnerId),
+        recursive: recursiveOwnerUpdate,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['library-folder-owner', folderId] });
+      queryClient.invalidateQueries({ queryKey: ['library-folders'] });
+      showToast(t('common.success'), 'success');
+    },
+    onError: (mutationError: Error) => showToast(mutationError.message, 'error'),
+  });
+
+  const ownerControls = isAdmin && folderOwner && !ownerError ? (
+    <div className="px-3 py-3 border-t border-bambu-dark-tertiary space-y-3">
+      <div className="flex items-center gap-2">
+        <User className="w-4 h-4 text-bambu-green flex-shrink-0" />
+        <span className="text-sm font-medium text-white">{t('common.user')}</span>
+      </div>
+      <select
+        value={selectedOwnerId}
+        onChange={(event) => setSelectedOwnerId(event.target.value)}
+        disabled={ownerMutation.isPending || usersLoading}
+        className="w-full bg-bambu-dark border border-bambu-dark-tertiary rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-bambu-green"
+      >
+        <option value="">{t('common.unassigned')}</option>
+        {users.map((user) => (
+          <option key={user.id} value={user.id}>
+            {user.username}
+          </option>
+        ))}
+      </select>
+      <label className="flex items-center gap-2 text-xs text-bambu-gray cursor-pointer">
+        <input
+          type="checkbox"
+          checked={recursiveOwnerUpdate}
+          onChange={(event) => setRecursiveOwnerUpdate(event.target.checked)}
+          disabled={ownerMutation.isPending}
+          className="accent-bambu-green"
+        />
+        {t('fileManager.searchSubfoldersHint')}
+      </label>
+      <button
+        type="button"
+        onClick={() => ownerMutation.mutate()}
+        disabled={ownerMutation.isPending || ownerLoading || usersLoading}
+        className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded bg-bambu-green text-black text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {ownerMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+        {t('common.save')}
+      </button>
+    </div>
+  ) : null;
+
+  // Regular users keep the original auto-hide behaviour. Admins can still
+  // repair ownership on a folder that has no README, so the owner card remains.
+  if ((isLoading || error || !data) && !ownerControls) return null;
+
+  if (!data) {
+    return (
+      <div className="mb-4 lg:mb-0 order-first lg:order-none lg:w-80 xl:w-96 lg:flex-shrink-0 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg overflow-hidden">
+        {ownerControls}
+      </div>
+    );
+  }
 
   if (collapsed) {
     return (
@@ -102,6 +199,7 @@ export function FolderReadmePanel({ folderId }: FolderReadmePanelProps) {
           <PanelRightClose className="w-4 h-4" />
         </button>
       </div>
+      {ownerControls}
       <div className="px-4 py-3 border-t border-bambu-dark-tertiary flex-1 overflow-y-auto max-h-96 lg:max-h-none text-sm text-bambu-gray-light leading-relaxed space-y-2">
         <ReactMarkdown
           remarkPlugins={[remarkGfmNoAutolink]}
