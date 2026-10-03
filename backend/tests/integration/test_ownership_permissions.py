@@ -1252,10 +1252,6 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
         import io
         import zipfile
 
-        from sqlalchemy import select
-
-        from backend.app.models.library import LibraryFolder
-
         payload = io.BytesIO()
         with zipfile.ZipFile(payload, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.writestr("nested/model.txt", "hello")
