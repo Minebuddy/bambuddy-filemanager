@@ -3703,7 +3703,8 @@ export function FileManagerPage() {
                     onTagClick={toggleTagFilter}
                     thumbnailVersion={thumbnailVersions[file.id]}
                     hasPermission={hasPermission}
-                    canModify={canModify}
+                    canReadLibrary={canReadLibrary}
+                    canModify={canModifyWithAccess}
                     authEnabled={authEnabled}
                     showModified={showModified}
                   />
