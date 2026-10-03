@@ -5934,10 +5934,7 @@ async def upload_preview_thumbnail(
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
 
-    # Ownership check (same shape as update_file)
-    if not can_modify_all:
-        if file.created_by_id != user.id:
-            raise HTTPException(status_code=403, detail="You can only update your own files")
+    await _require_file_role(db, file, user, can_modify_all, "manager")
 
     if file.file_type not in CLIENT_THUMBNAIL_TYPES:
         raise HTTPException(status_code=400, detail="File type does not accept client-rendered thumbnails")
@@ -6031,10 +6028,13 @@ async def upload_file_photo(
     if not library_file:
         raise HTTPException(status_code=404, detail="File not found")
 
-    # Ownership check (same shape as update_file)
-    if not can_modify_all:
-        if library_file.created_by_id != user.id:
-            raise HTTPException(status_code=403, detail="You can only update your own files")
+    await _require_file_role(
+        db,
+        library_file,
+        user,
+        can_modify_all,
+        "manager",
+    )
 
     if not file.filename or not file.filename.lower().endswith(PHOTO_EXTENSIONS):
         raise HTTPException(status_code=400, detail="File must be an image (.jpg, .jpeg, .png, .webp)")
@@ -6115,9 +6115,13 @@ async def delete_file_photo(
     if not library_file:
         raise HTTPException(status_code=404, detail="File not found")
 
-    if not can_modify_all:
-        if library_file.created_by_id != user.id:
-            raise HTTPException(status_code=403, detail="You can only update your own files")
+    await _require_file_role(
+        db,
+        library_file,
+        user,
+        can_modify_all,
+        "manager",
+    )
 
     if not library_file.photos or filename not in library_file.photos:
         raise HTTPException(status_code=404, detail="Photo not found")
@@ -6442,8 +6446,15 @@ async def get_library_stats(
     # Without LIBRARY_READ_ALL the stats reflect only the caller's own files —
     # match what the file list endpoint shows so the numbers stay consistent.
     file_filters = [LibraryFile.deleted_at.is_(None)]
+    visible_folder_ids: set[int] | None = None
     if user is not None and not can_read_all:
-        file_filters.append(LibraryFile.created_by_id == user.id)
+        visible_folder_ids = await accessible_folder_ids(db, user, "viewer")
+        visibility_conditions = [LibraryFile.created_by_id == user.id]
+        if visible_folder_ids:
+            visibility_conditions.append(
+                LibraryFile.folder_id.in_(visible_folder_ids)
+            )
+        file_filters.append(or_(*visibility_conditions))
 
     # Total files
     total_files_result = await db.execute(select(func.count(LibraryFile.id)).where(*file_filters))
@@ -6451,11 +6462,18 @@ async def get_library_stats(
 
     # Total folders follows the same ownership scope as the folder tree (#3201).
     folder_count_query = select(func.count(LibraryFolder.id))
-    if user is not None and not can_read_all:
-        folder_count_query = folder_count_query.where(LibraryFolder.created_by_id == user.id)
-    total_folders_result = await db.execute(folder_count_query)
-    total_folders = total_folders_result.scalar() or 0
+    if visible_folder_ids is not None:
+        if not visible_folder_ids:
+            total_folders = 0
+            folder_count_query = None
+        else:
+            folder_count_query = folder_count_query.where(
+                LibraryFolder.id.in_(visible_folder_ids)
+            )
 
+    if folder_count_query is not None:
+        total_folders_result = await db.execute(folder_count_query)
+        total_folders = total_folders_result.scalar() or 0
     # Total size
     total_size_result = await db.execute(select(func.sum(LibraryFile.file_size)).where(*file_filters))
     total_size = total_size_result.scalar() or 0
