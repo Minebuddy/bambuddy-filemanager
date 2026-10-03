@@ -107,8 +107,9 @@ async def update_folder_owner(
                 select(LibraryFolder).where(LibraryFolder.parent_id.in_(pending_ids))
             )
             children = list(children_result.scalars().all())
-            pending_ids = [child.id for child in children]
-            folders_to_update.extend(child for child in children if not child.is_external)
+            internal_children = [child for child in children if not child.is_external]
+            pending_ids = [child.id for child in internal_children]
+            folders_to_update.extend(internal_children)
 
     for target in folders_to_update:
         target.created_by_id = body.created_by_id
