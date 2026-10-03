@@ -35,11 +35,27 @@ class FolderUpdate(BaseModel):
     archive_id: int | None = None  # 0 to unlink
 
 
+class FolderOwnerUpdate(BaseModel):
+    """Admin-only folder ownership reassignment."""
+
+    created_by_id: int | None = None
+    recursive: bool = False
+
+
+class FolderOwnerUpdateResponse(BaseModel):
+    """Result of an admin folder ownership reassignment."""
+
+    id: int
+    created_by_id: int | None
+    updated_folders: int
+
+
 class FolderResponse(BaseModel):
     """Schema for folder response."""
 
     id: int
     name: str
+    created_by_id: int | None = None
     parent_id: int | None
     project_id: int | None = None
     archive_id: int | None = None
@@ -81,6 +97,7 @@ class FolderTreeItem(BaseModel):
 
     id: int
     name: str
+    created_by_id: int | None = None
     parent_id: int | None
     project_id: int | None = None
     archive_id: int | None = None
