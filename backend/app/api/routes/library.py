@@ -6027,15 +6027,17 @@ async def bulk_delete(
             remove_library_photos_dir(file.id)
             await db.delete(file)
 
-    # Delete folders (cascade will handle contents). Folders have no ownership
-    # tracking, so users without *_all permission may only delete empty,
-    # non-external, non-linked folders (#1781) — same rule as DELETE /folders/{id}.
+    # Delete folders using the same ownership-safe cascade rule as
+    # DELETE /folders/{id}.
     for folder_id in data.folder_ids:
         result = await db.execute(select(LibraryFolder).where(LibraryFolder.id == folder_id))
         folder = result.scalar_one_or_none()
         if folder:
-            if not can_modify_all and await _restricted_folder_delete_blocker(db, folder):
-                continue
+            if not can_modify_all:
+                if user is None:
+                    continue
+                if await _restricted_owned_folder_delete_blocker(db, folder, user):
+                    continue
             # Count files that will be deleted
             file_count_result = await db.execute(
                 select(func.count(LibraryFile.id)).where(
@@ -6085,8 +6087,11 @@ async def get_library_stats(
     total_files_result = await db.execute(select(func.count(LibraryFile.id)).where(*file_filters))
     total_files = total_files_result.scalar() or 0
 
-    # Total folders (folders are shared org structure, not per-user — count all)
-    total_folders_result = await db.execute(select(func.count(LibraryFolder.id)))
+    # Total folders follows the same ownership scope as the folder tree (#3201).
+    folder_count_query = select(func.count(LibraryFolder.id))
+    if user is not None and not can_read_all:
+        folder_count_query = folder_count_query.where(LibraryFolder.created_by_id == user.id)
+    total_folders_result = await db.execute(folder_count_query)
     total_folders = total_folders_result.scalar() or 0
 
     # Total size
