@@ -484,11 +484,13 @@ async def recent_imports(
     _ = current_user  # permission gate only
     capped = max(1, min(50, int(limit)))
 
+    recent_query = LibraryFile.active().where(
+        LibraryFile.source_type == makerworld_provider.source_type
+    )
+    if current_user is not None and not current_user.has_permission(Permission.LIBRARY_READ_ALL.value):
+        recent_query = recent_query.where(LibraryFile.created_by_id == current_user.id)
     result = await db.execute(
-        LibraryFile.active()
-        .where(LibraryFile.source_type == makerworld_provider.source_type)
-        .order_by(LibraryFile.created_at.desc())
-        .limit(capped)
+        recent_query.order_by(LibraryFile.created_at.desc()).limit(capped)
     )
     rows = result.scalars().all()
 

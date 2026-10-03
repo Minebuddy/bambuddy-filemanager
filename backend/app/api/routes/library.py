@@ -2552,6 +2552,8 @@ async def extract_zip_file(
         target_folder = folder_result.scalar_one_or_none()
         if not target_folder:
             raise HTTPException(status_code=404, detail="Target folder not found")
+        if current_user is not None and not current_user.has_permission(Permission.LIBRARY_READ_ALL.value):
+            _ensure_library_folder_visible(target_folder, current_user, False)
         if target_folder.is_external and target_folder.external_readonly:
             raise HTTPException(status_code=403, detail="Cannot extract ZIP to a read-only external folder")
         if target_folder.is_external:
@@ -2591,19 +2593,26 @@ async def extract_zip_file(
         # Remove .zip extension to get folder name
         zip_folder_name = file.filename[:-4] if file.filename.lower().endswith(".zip") else file.filename
         # Check if folder already exists
-        existing = await db.execute(
-            select(LibraryFolder).where(
-                LibraryFolder.name == zip_folder_name,
-                LibraryFolder.parent_id == folder_id if folder_id else LibraryFolder.parent_id.is_(None),
-            )
+        zip_folder_query = select(LibraryFolder).where(
+            LibraryFolder.name == zip_folder_name,
+            LibraryFolder.parent_id == folder_id if folder_id else LibraryFolder.parent_id.is_(None),
         )
+        if current_user is not None:
+            zip_folder_query = zip_folder_query.where(LibraryFolder.created_by_id == current_user.id)
+        else:
+            zip_folder_query = zip_folder_query.where(LibraryFolder.created_by_id.is_(None))
+        existing = await db.execute(zip_folder_query)
         existing_folder = existing.scalar_one_or_none()
         if existing_folder:
             zip_folder_id = existing_folder.id
             logger.info("Reusing existing folder '%s' with id=%s", zip_folder_name, zip_folder_id)
         else:
             # Create folder
-            new_folder = LibraryFolder(name=zip_folder_name, parent_id=folder_id)
+            new_folder = LibraryFolder(
+                name=zip_folder_name,
+                parent_id=folder_id,
+                created_by_id=current_user.id if current_user else None,
+            )
             db.add(new_folder)
             await db.flush()
             await db.commit()  # Commit folder creation immediately
@@ -2645,21 +2654,32 @@ async def extract_zip_file(
                                     current_parent = folder_cache[current_path]
                                 else:
                                     # Check if folder exists
-                                    existing = await db.execute(
-                                        select(LibraryFolder).where(
-                                            LibraryFolder.name == part,
-                                            LibraryFolder.parent_id == current_parent
-                                            if current_parent
-                                            else LibraryFolder.parent_id.is_(None),
-                                        )
+                                    nested_folder_query = select(LibraryFolder).where(
+                                        LibraryFolder.name == part,
+                                        LibraryFolder.parent_id == current_parent
+                                        if current_parent
+                                        else LibraryFolder.parent_id.is_(None),
                                     )
+                                    if current_user is not None:
+                                        nested_folder_query = nested_folder_query.where(
+                                            LibraryFolder.created_by_id == current_user.id
+                                        )
+                                    else:
+                                        nested_folder_query = nested_folder_query.where(
+                                            LibraryFolder.created_by_id.is_(None)
+                                        )
+                                    existing = await db.execute(nested_folder_query)
                                     existing_folder = existing.scalar_one_or_none()
 
                                     if existing_folder:
                                         current_parent = existing_folder.id
                                     else:
                                         # Create folder
-                                        new_folder = LibraryFolder(name=part, parent_id=current_parent)
+                                        new_folder = LibraryFolder(
+                                            name=part,
+                                            parent_id=current_parent,
+                                            created_by_id=current_user.id if current_user else None,
+                                        )
                                         db.add(new_folder)
                                         await db.flush()
                                         current_parent = new_folder.id
