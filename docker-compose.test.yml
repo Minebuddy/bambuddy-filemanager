@@ -1,37 +1,66 @@
 services:
-  bambuddy-test:
+  # Backend unit tests
+  backend-test:
     build:
       context: .
-      dockerfile: Dockerfile.portainer-test
-      args:
-        BAMBUDDY_BUILD_BRANCH: feature/library-access-control
-
-    image: bambuddy-filemanager:test
-    container_name: bambuddy-filemanager-test
-
-    cap_add:
-      - NET_BIND_SERVICE
-
-    # Keep the test instance isolated from the production host-network stack.
-    ports:
-      - "18109:8000"
-
+      dockerfile: Dockerfile.test
+      target: backend-test
+    container_name: bambuddy-backend-test
     volumes:
-      - /local/bambuddy-filemanager-test/data:/app/data:rw
-      - /local/bambuddy-filemanager-test/logs:/app/logs:rw
-      - /local/bambuddy-filemanager-test/virtual_printer:/app/data/virtual_printer:rw
-
+      - ./backend:/app/backend:ro
     environment:
-      - TZ=Europe/Berlin
-      - PUID=1000
-      - PGID=100
-      - PORT=8000
+      - TESTING=1
+      - PYTHONUNBUFFERED=1
 
+  # Frontend unit tests
+  frontend-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+      target: frontend-test
+    container_name: bambuddy-frontend-test
+    volumes:
+      - ./frontend/src:/app/frontend/src:ro
+      - ./frontend/tests:/app/frontend/tests:ro
+
+  # Integration test - full application
+  integration:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bambuddy-integration-test
+    ports:
+      - "8001:8000"
+    environment:
+      - TESTING=1
+      - DATA_DIR=/app/data
     healthcheck:
-      test: timeout 10s bash -c ':> /dev/tcp/127.0.0.1/8000' || exit 1
-      interval: 10s
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
       timeout: 5s
-      retries: 3
-      start_period: 90s
+      retries: 10
+      start_period: 10s
+    volumes:
+      - integration_test_data:/app/data
 
-    restart: on-failure:5
+  # Integration test runner
+  integration-test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+      target: backend-test
+    container_name: bambuddy-integration-runner
+    depends_on:
+      integration:
+        condition: service_healthy
+    environment:
+      - BAMBUDDY_TEST_URL=http://integration:8000
+      - TESTING=1
+    # -v dropped + -n auto so integration tests inherit the same noise /
+    # parallelism profile as the backend-test image (see Dockerfile.test CMD).
+    command: ["pytest", "backend/tests/integration/", "--tb=short", "-p", "no:cacheprovider", "-n", "auto"]
+    volumes:
+      - ./backend:/app/backend:ro
+
+volumes:
+  integration_test_data:
