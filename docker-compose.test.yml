@@ -2,28 +2,36 @@ services:
   bambuddy-test:
     build:
       context: .
-      dockerfile: Dockerfile
-    container_name: bambuddy-filemanager-test
-    restart: unless-stopped
+      dockerfile: Dockerfile.portainer-test
+      args:
+        BAMBUDDY_BUILD_BRANCH: feature/library-access-control
 
-    # Bridge mode keeps this isolated from any production Bambuddy instance.
-    # Printer discovery will not work in this test stack; add a printer manually
-    # by IP if you need printer-facing tests.
+    image: bambuddy-filemanager:test
+    container_name: bambuddy-filemanager-test
+
+    cap_add:
+      - NET_BIND_SERVICE
+
+    # Keep the test instance isolated from the production host-network stack.
     ports:
-      - "18000:8000"
+      - "18109:8000"
 
     volumes:
-      - bambuddy_filemanager_test_data:/app/data
-      - bambuddy_filemanager_test_logs:/app/logs
+      - /local/bambuddy-filemanager-test/data:/app/data:rw
+      - /local/bambuddy-filemanager-test/logs:/app/logs:rw
+      - /local/bambuddy-filemanager-test/virtual_printer:/app/data/virtual_printer:rw
 
     environment:
-      - TZ=Europe/Amsterdam
+      - TZ=Europe/Berlin
       - PUID=1000
-      - PGID=1000
+      - PGID=100
       - PORT=8000
 
-    stop_grace_period: 30s
+    healthcheck:
+      test: timeout 10s bash -c ':> /dev/tcp/127.0.0.1/8000' || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
 
-volumes:
-  bambuddy_filemanager_test_data:
-  bambuddy_filemanager_test_logs:
+    restart: on-failure:5
