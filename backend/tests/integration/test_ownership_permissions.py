@@ -2590,7 +2590,7 @@ class TestReadIDORClosure(TestOwnershipPermissionsSetup):
 _WRITE_SUBRESOURCE_ROUTES = [
     ("favorite", "post", "/favorite", {}),
     ("timelapse_delete", "delete", "/timelapse", {}),
-    ("photo_upload", "post", "/photos", {"files": {"file": ("x.jpg", b"\x89PNG\r\n\x1a\n", "image/jpeg")}}),
+    ("photo_upload", "post", "/photos", {"files": {"file": ("x.jpg", b"\x89PNG\n\x1a\n", "image/jpeg")}}),
     ("photo_delete", "delete", "/photos/nonexistent.jpg", {}),
     ("project_page", "patch", "/project-page", {"json": {"title": "hijacked"}}),
     ("source_upload", "post", "/source", {"files": {"file": ("x.3mf", b"PK\x03\x04", "application/octet-stream")}}),
@@ -3187,13 +3187,10 @@ class TestLibraryAccessOverview(TestOwnershipPermissionsSetup):
         assert row["distinct_file_owners"] == 2
         assert row["ownerless_file_count"] == 1
         assert row["is_ambiguous"] is True
-        assert [(share["principal_name"], share["role"]) for share in row["direct_shares"]] == [
-            ("Class 3B", "viewer")
+        assert [(share["principal_name"], share["role"]) for share in row["direct_shares"]] == [("Class 3B", "viewer")]
+        assert [(share["principal_name"], share["role"]) for share in row["inherited_shares"]] == [
+            ("operator1", "contributor")
         ]
-        assert [
-            (share["principal_name"], share["role"])
-            for share in row["inherited_shares"]
-        ] == [("operator1", "contributor")]
 
         # Reviewing ambiguous legacy contents does not reassign folder ownership.
         await db_session.refresh(child)

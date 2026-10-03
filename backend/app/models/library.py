@@ -117,8 +117,7 @@ class LibraryFolderShare(Base):
     __tablename__ = "library_folder_shares"
     __table_args__ = (
         CheckConstraint(
-            "(user_id IS NOT NULL AND group_id IS NULL) OR "
-            "(user_id IS NULL AND group_id IS NOT NULL)",
+            "(user_id IS NOT NULL AND group_id IS NULL) OR (user_id IS NULL AND group_id IS NOT NULL)",
             name="ck_library_folder_shares_one_principal",
         ),
         CheckConstraint(

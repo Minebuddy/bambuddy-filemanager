@@ -1996,18 +1996,15 @@ async def run_migrations(conn):
     )
     await _safe_execute(
         conn,
-        "CREATE INDEX IF NOT EXISTS ix_library_folder_shares_folder_id "
-        "ON library_folder_shares (folder_id)",
+        "CREATE INDEX IF NOT EXISTS ix_library_folder_shares_folder_id ON library_folder_shares (folder_id)",
     )
     await _safe_execute(
         conn,
-        "CREATE INDEX IF NOT EXISTS ix_library_folder_shares_user_id "
-        "ON library_folder_shares (user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_library_folder_shares_user_id ON library_folder_shares (user_id)",
     )
     await _safe_execute(
         conn,
-        "CREATE INDEX IF NOT EXISTS ix_library_folder_shares_group_id "
-        "ON library_folder_shares (group_id)",
+        "CREATE INDEX IF NOT EXISTS ix_library_folder_shares_group_id ON library_folder_shares (group_id)",
     )
 
     # Existing PostgreSQL databases predate the finance ORM tables. These must

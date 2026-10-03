@@ -34,9 +34,7 @@ def role_allows(role: str | None, required: str) -> bool:
 
 
 async def _user_group_ids(db: AsyncSession, user_id: int) -> set[int]:
-    rows = await db.execute(
-        select(user_groups.c.group_id).where(user_groups.c.user_id == user_id)
-    )
+    rows = await db.execute(select(user_groups.c.group_id).where(user_groups.c.user_id == user_id))
     return {int(group_id) for (group_id,) in rows.all()}
 
 
@@ -67,20 +65,19 @@ async def folder_access_roles(db: AsyncSession, user: User) -> dict[int, str]:
         principal_filters.append(LibraryFolderShare.group_id.in_(group_ids))
 
     share_rows = (
-        await db.execute(
-            select(LibraryFolderShare.folder_id, LibraryFolderShare.role).where(
-                or_(*principal_filters)
-            )
-        )
+        await db.execute(select(LibraryFolderShare.folder_id, LibraryFolderShare.role).where(or_(*principal_filters)))
     ).all()
 
     direct_share_roles: dict[int, str] = {}
     for folder_id, role in share_rows:
         fid = int(folder_id)
-        direct_share_roles[fid] = stronger_role(
-            direct_share_roles.get(fid),
-            role,
-        ) or role
+        direct_share_roles[fid] = (
+            stronger_role(
+                direct_share_roles.get(fid),
+                role,
+            )
+            or role
+        )
 
     parents: dict[int, int | None] = {}
     owners: dict[int, int | None] = {}
@@ -101,9 +98,7 @@ async def folder_access_roles(db: AsyncSession, user: User) -> dict[int, str]:
         visiting.add(folder_id)
         parent_id = parents.get(folder_id)
         parent_role = (
-            inherited_share_role(parent_id, visiting)
-            if parent_id is not None and parent_id in parents
-            else None
+            inherited_share_role(parent_id, visiting) if parent_id is not None and parent_id in parents else None
         )
         owner_role = "manager" if owners.get(folder_id) == user.id else None
         result = stronger_role(
@@ -132,11 +127,7 @@ async def accessible_folder_ids(
     """Return folder IDs where the user has at least the required role."""
 
     roles = await folder_access_roles(db, user)
-    return {
-        folder_id
-        for folder_id, role in roles.items()
-        if role_allows(role, required_role)
-    }
+    return {folder_id for folder_id, role in roles.items() if role_allows(role, required_role)}
 
 
 async def effective_folder_role(
@@ -158,8 +149,4 @@ async def effective_role_for_any_folder(
 
     wanted = set(folder_ids)
     roles = await folder_access_roles(db, user)
-    return {
-        folder_id: role
-        for folder_id, role in roles.items()
-        if folder_id in wanted
-    }
+    return {folder_id: role for folder_id, role in roles.items() if folder_id in wanted}
