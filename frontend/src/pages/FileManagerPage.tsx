@@ -78,6 +78,7 @@ import { RunWithPipelineModal } from '../components/RunWithPipelineModal';
 import { BulkTagsPickerModal } from '../components/BulkTagsPickerModal';
 import { FileUploadModal } from '../components/FileUploadModal';
 import { FolderReadmePanel } from '../components/FolderReadmePanel';
+import { FolderOwnerModal } from '../components/FolderOwnerModal';
 import { LibraryTagsModal } from '../components/LibraryTagsModal';
 import { LibraryFileDetailsModal } from '../components/LibraryFileDetailsModal';
 import { PurgeOldFilesModal } from '../components/PurgeOldFilesModal';
@@ -770,6 +771,8 @@ interface FolderTreeItemProps {
   onDelete: (id: number) => void;
   onLink: (folder: LibraryFolderTree) => void;
   onRename: (folder: LibraryFolderTree) => void;
+  onManageOwner: (folder: LibraryFolderTree) => void;
+  isAdmin: boolean;
   depth?: number;
   wrapNames?: boolean;
   defaultExpanded?: boolean;
@@ -788,6 +791,8 @@ interface FolderActionsMenuProps {
   onDelete: (id: number) => void;
   onLink: (folder: LibraryFolderTree) => void;
   onRename: (folder: LibraryFolderTree) => void;
+  onManageOwner: (folder: LibraryFolderTree) => void;
+  isAdmin: boolean;
   hasPermission: (permission: Permission) => boolean;
   // Hide the kebab until its `group` row is hovered or focused — only for
   // pointers that can hover (#2865). The menu is a DOM descendant, so the
@@ -798,7 +803,7 @@ interface FolderActionsMenuProps {
   t: TFunction;
 }
 
-function FolderActionsMenu({ folder, onDelete, onLink, onRename, hasPermission, revealOnHover = false, tabIndex, t }: FolderActionsMenuProps) {
+function FolderActionsMenu({ folder, onDelete, onLink, onRename, onManageOwner, isAdmin, hasPermission, revealOnHover = false, tabIndex, t }: FolderActionsMenuProps) {
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -840,6 +845,13 @@ function FolderActionsMenu({ folder, onDelete, onLink, onRename, hasPermission, 
       disabled: !canRename,
       title: !canRename ? t('fileManager.noPermissionLinkFolder') : undefined,
     },
+    ...(isAdmin && !isExternal
+      ? [{
+          label: t('fileManager.folderOwner.manage', { defaultValue: 'Manage owner' }),
+          icon: <User className="w-3.5 h-3.5" />,
+          onClick: () => onManageOwner(folder),
+        }]
+      : []),
     {
       label: t('common.delete'),
       icon: <Trash2 className="w-3.5 h-3.5" />,
@@ -887,7 +899,7 @@ function FolderActionsMenu({ folder, onDelete, onLink, onRename, hasPermission, 
   );
 }
 
-function FolderTreeItem({ folder, selectedFolderId, onSelect, onDelete, onLink, onRename, depth = 0, wrapNames = false, defaultExpanded = true, showModified = false, hasPermission, t }: FolderTreeItemProps) {
+function FolderTreeItem({ folder, selectedFolderId, onSelect, onDelete, onLink, onRename, onManageOwner, isAdmin, depth = 0, wrapNames = false, defaultExpanded = true, showModified = false, hasPermission, t }: FolderTreeItemProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const hasChildren = folder.children.length > 0;
   const isLinked = folder.project_id || folder.archive_id;
@@ -975,6 +987,8 @@ function FolderTreeItem({ folder, selectedFolderId, onSelect, onDelete, onLink, 
           onDelete={onDelete}
           onLink={onLink}
           onRename={onRename}
+          onManageOwner={onManageOwner}
+          isAdmin={isAdmin}
           hasPermission={hasPermission}
           revealOnHover={!wrapNames}
           t={t}
@@ -991,6 +1005,8 @@ function FolderTreeItem({ folder, selectedFolderId, onSelect, onDelete, onLink, 
               onDelete={onDelete}
               onLink={onLink}
               onRename={onRename}
+              onManageOwner={onManageOwner}
+              isAdmin={isAdmin}
               depth={depth + 1}
               wrapNames={wrapNames}
               defaultExpanded={defaultExpanded}
@@ -1573,7 +1589,7 @@ export function FileManagerPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const { hasPermission, hasAnyPermission, canModify, authEnabled } = useAuth();
+  const { hasPermission, hasAnyPermission, canModify, authEnabled, isAdmin } = useAuth();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
@@ -1602,6 +1618,7 @@ export function FileManagerPage() {
   const [showBulkTagsModal, setShowBulkTagsModal] = useState(false);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [linkFolder, setLinkFolder] = useState<LibraryFolderTree | null>(null);
+  const [ownerFolder, setOwnerFolder] = useState<LibraryFolderTree | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'file' | 'folder' | 'bulk'; id: number; count?: number } | null>(null);
   const [printFile, setPrintFile] = useState<LibraryFileListItem | null>(null);
   const [sliceFile, setSliceFile] = useState<LibraryFileListItem | null>(null);
@@ -3012,6 +3029,8 @@ export function FileManagerPage() {
                 onDelete={(id) => setDeleteConfirm({ type: 'folder', id })}
                 onLink={setLinkFolder}
                 onRename={(f) => setRenameItem({ type: 'folder', id: f.id, name: f.name })}
+                onManageOwner={setOwnerFolder}
+                isAdmin={isAdmin}
                 wrapNames={wrapFolderNames}
                 defaultExpanded={!collapseFoldersByDefault}
                 showModified={showModified}
@@ -3473,6 +3492,8 @@ export function FileManagerPage() {
                             onDelete={(id) => setDeleteConfirm({ type: 'folder', id })}
                             onLink={setLinkFolder}
                             onRename={(f) => setRenameItem({ type: 'folder', id: f.id, name: f.name })}
+                            onManageOwner={setOwnerFolder}
+                            isAdmin={isAdmin}
                             hasPermission={hasPermission}
                             revealOnHover={!isSelectedFolder}
                             tabIndex={isSelectedFolder ? 0 : -1}
@@ -3864,6 +3885,13 @@ export function FileManagerPage() {
         fileIds={selectedFiles}
         onClose={() => setShowBulkTagsModal(false)}
       />
+
+      {ownerFolder && isAdmin && (
+        <FolderOwnerModal
+          folder={ownerFolder}
+          onClose={() => setOwnerFolder(null)}
+        />
+      )}
 
       {linkFolder && (
         <LinkFolderModal
