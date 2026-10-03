@@ -8344,6 +8344,7 @@ export interface LibraryFolderTree {
   external_readonly: boolean;
   file_count: number;
   access_role?: LibraryAccessRole | null;
+  navigation_only?: boolean;
   // max(folder.updated_at, max(immediate-child file.updated_at)). Used by
   // the File Manager folder tree's "sort by recent activity" mode (#1770).
   latest_activity_at: string | null;

@@ -8,7 +8,7 @@ Permission model:
 * **Per-user trash** (list / restore / hard-delete / empty own trash) is
   gated by the existing :attr:`Permission.LIBRARY_DELETE_ALL` /
   :attr:`Permission.LIBRARY_DELETE_OWN` ownership pair, so a regular user
-  sees their own trashed files and files in folders they manage. An admin
+  sees their own trashed files and files explicitly shared with manager access. An admin
   sees everyone's. Empty-trash remains limited to the caller's own files.
 """
 
@@ -38,7 +38,12 @@ from backend.app.schemas.library_trash import (
     TrashListResponse,
     TrashSettings,
 )
-from backend.app.services.library_access import accessible_folder_ids, effective_folder_role, role_allows
+from backend.app.services.library_access import (
+    effective_file_role,
+    effective_folder_role,
+    file_access_roles,
+    role_allows,
+)
 from backend.app.services.library_trash import (
     MAX_RETENTION_DAYS,
     MIN_RETENTION_DAYS,
@@ -117,8 +122,8 @@ async def list_trash(
             # Defensive: ownership checker only returns user=None when auth is off,
             # in which case can_modify_all=True. If we somehow land here, err safe.
             raise HTTPException(status_code=403, detail="Authentication required")
-        manager_ids = await accessible_folder_ids(db, user, "manager")
-        base_conditions.append(or_(LibraryFile.created_by_id == user.id, LibraryFile.folder_id.in_(manager_ids)))
+        manager_ids = [fid for fid, role in (await file_access_roles(db, user)).items() if role_allows(role, "manager")]
+        base_conditions.append(or_(LibraryFile.created_by_id == user.id, LibraryFile.id.in_(manager_ids)))
 
     total_result = await db.execute(select(func.count(LibraryFile.id)).where(*base_conditions))
     total = int(total_result.scalar() or 0)
@@ -173,7 +178,7 @@ async def _load_trashed_file(
     if file is None:
         raise HTTPException(status_code=404, detail="Trashed file not found")
     if not can_modify_all:
-        role = await effective_folder_role(db, file.folder_id, user) if user and file.folder_id is not None else None
+        role = await effective_file_role(db, file.id, user) if user else None
         if user is None or (file.created_by_id != user.id and not role_allows(role, "manager")):
             raise HTTPException(status_code=403, detail="Ownership or manager access is required for this trashed file")
     return file

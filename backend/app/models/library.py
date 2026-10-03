@@ -161,6 +161,51 @@ class LibraryFolderShare(Base):
     created_by: Mapped["User | None"] = relationship(foreign_keys=[created_by_id])
 
 
+class LibraryFileShare(Base):
+    """User/group access grant on a library file."""
+
+    __tablename__ = "library_file_shares"
+    __table_args__ = (
+        CheckConstraint(
+            "(user_id IS NOT NULL AND group_id IS NULL) OR (user_id IS NULL AND group_id IS NOT NULL)",
+            name="ck_library_file_shares_one_principal",
+        ),
+        CheckConstraint(
+            "role IN ('viewer', 'contributor', 'manager')",
+            name="ck_library_file_shares_role",
+        ),
+        UniqueConstraint("file_id", "user_id", name="uq_library_file_share_user"),
+        UniqueConstraint("file_id", "group_id", name="uq_library_file_share_group"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    file_id: Mapped[int] = mapped_column(
+        ForeignKey("library_files.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    group_id: Mapped[int | None] = mapped_column(
+        ForeignKey("groups.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    user: Mapped["User | None"] = relationship(foreign_keys=[user_id])
+    group: Mapped["Group | None"] = relationship(foreign_keys=[group_id])
+    created_by: Mapped["User | None"] = relationship(foreign_keys=[created_by_id])
+
+
 class FileVariantGroup(Base):
     """A set of library files that are the same job sliced for different printers.
 

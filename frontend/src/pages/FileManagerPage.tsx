@@ -1661,6 +1661,7 @@ export function FileManagerPage() {
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [linkFolder, setLinkFolder] = useState<LibraryFolderTree | null>(null);
   const [ownerFolder, setOwnerFolder] = useState<LibraryFolderTree | null>(null);
+  const [sharingFile, setSharingFile] = useState<{id: number; name: string} | null>(null);
   const [sharingFolder, setSharingFolder] = useState<LibraryFolderTree | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'file' | 'folder' | 'bulk'; id: number; count?: number } | null>(null);
   const [printFile, setPrintFile] = useState<LibraryFileListItem | null>(null);
@@ -3382,6 +3383,10 @@ export function FileManagerPage() {
                   </span>
                   <div className="hidden sm:block flex-1" />
                   <div className="w-full sm:w-auto flex flex-wrap items-center gap-2 mt-2 sm:mt-0">
+                    {selectedFiles.length === 1 && hasPermission('library:share') && (() => {
+                      const file = selectableFiles.get(selectedFiles[0]);
+                      return file && !file.is_external && (isAdmin || file.created_by_id === user?.id) ? <Button variant="secondary" size="sm" onClick={() => setSharingFile({id: file.id, name: file.filename})}><Share2 className="w-4 h-4 mr-1" />Manage access</Button> : null;
+                    })()}
                     {previewSelection && (
                       <Button
                         variant="secondary"
@@ -4012,6 +4017,7 @@ export function FileManagerPage() {
         />
       )}
 
+      {sharingFile && <FolderSharingModal folder={sharingFile} kind="files" onClose={() => setSharingFile(null)} />}
       {sharingFolder && hasPermission('library:share') && (
         <FolderSharingModal
           folder={sharingFolder}

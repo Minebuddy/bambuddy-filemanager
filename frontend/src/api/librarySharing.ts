@@ -7,7 +7,8 @@ export type FolderSharePrincipalType = 'user' | 'group';
 
 export interface FolderShare {
   id: number;
-  folder_id: number;
+  folder_id?: number;
+  file_id?: number;
   principal_type: FolderSharePrincipalType;
   principal_id: number;
   principal_name: string;
@@ -54,23 +55,44 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export interface AccessResource {
+  id: number;
+  kind: 'file' | 'folder';
+  name: string;
+  path: string;
+  owner_id: number | null;
+  owner_name: string | null;
+  shares: FolderShare[];
+}
+export interface BulkAccessRequest {
+  kind: 'file' | 'folder';
+  ids: number[];
+  action: 'grant' | 'revoke' | 'owner';
+  principal_type?: FolderSharePrincipalType;
+  principal_id?: number;
+  role?: FolderShareRole;
+  owner_id?: number | null;
+}
 export const librarySharingApi = {
-  getShares: (folderId: number) =>
-    request<FolderShare[]>(`/library/folders/${folderId}/shares`),
+  getAccessResources: (params: URLSearchParams) => request<{items: AccessResource[]; has_more: boolean}>(`/library/access/resources?${params}`),
+  getAccessPrincipals: () => request<FolderSharePrincipals>('/library/access/principals'),
+  bulkAccess: (data: BulkAccessRequest) => request<{updated: number}>('/library/access/bulk', {method: 'POST', body: JSON.stringify(data)}),
+  getShares: (folderId: number, kind: 'folders' | 'files' = 'folders') =>
+    request<FolderShare[]>(`/library/${kind}/${folderId}/shares`),
 
-  getPrincipals: (folderId: number) =>
+  getPrincipals: (folderId: number, kind: 'folders' | 'files' = 'folders') =>
     request<FolderSharePrincipals>(
-      `/library/folders/${folderId}/share-principals`,
+      `/library/${kind}/${folderId}/share-principals`,
     ),
 
-  upsertShare: (folderId: number, data: FolderShareUpsert) =>
-    request<FolderShare>(`/library/folders/${folderId}/shares`, {
+  upsertShare: (folderId: number, data: FolderShareUpsert, kind: 'folders' | 'files' = 'folders') =>
+    request<FolderShare>(`/library/${kind}/${folderId}/shares`, {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
 
-  deleteShare: (folderId: number, shareId: number) =>
-    request<void>(`/library/folders/${folderId}/shares/${shareId}`, {
+  deleteShare: (folderId: number, shareId: number, kind: 'folders' | 'files' = 'folders') =>
+    request<void>(`/library/${kind}/${folderId}/shares/${shareId}`, {
       method: 'DELETE',
     }),
 };

@@ -51,16 +51,7 @@ describe('LibraryAccessOverviewModal', () => {
                 role: 'viewer',
               },
             ],
-            inherited_shares: [
-              {
-                source_folder_id: 3,
-                source_folder_name: 'Teacher project',
-                principal_type: 'user',
-                principal_id: 7,
-                principal_name: 'teacher',
-                role: 'contributor',
-              },
-            ],
+            inherited_shares: [],
           },
         ]),
       ),
@@ -80,7 +71,7 @@ describe('LibraryAccessOverviewModal', () => {
     expect(await screen.findByText('Legacy student work')).toBeInTheDocument();
     expect(screen.getByText('Mixed or unknown file owners')).toBeInTheDocument();
     expect(screen.getByText('Class 3B (viewer)')).toBeInTheDocument();
-    expect(screen.getByText('teacher (contributor)')).toBeInTheDocument();
+    expect(screen.queryByText('Inherited from parent folders')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Manage owner' }));
     expect(onManageOwner).toHaveBeenCalledWith(folder);

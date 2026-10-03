@@ -57,7 +57,7 @@ from backend.app.schemas.library import (
     VariantGroupResponse,
     VariantGroupUpdate,
 )
-from backend.app.services.library_access import folder_access_roles, role_allows
+from backend.app.services.library_access import file_access_roles, role_allows
 from backend.app.utils.printer_models import normalize_printer_model, normalize_printer_model_id
 
 logger = logging.getLogger(__name__)
@@ -112,13 +112,13 @@ async def _load_files(
     if user is None:
         return {}
 
-    roles = await folder_access_roles(db, user)
+    roles = await file_access_roles(db, user)
     allowed: dict[int, LibraryFile] = {}
     for lib_file in rows:
         if lib_file.created_by_id == user.id:
             allowed[lib_file.id] = lib_file
             continue
-        if lib_file.folder_id is not None and role_allows(roles.get(lib_file.folder_id), required_role):
+        if role_allows(roles.get(lib_file.id), required_role):
             allowed[lib_file.id] = lib_file
     return allowed
 

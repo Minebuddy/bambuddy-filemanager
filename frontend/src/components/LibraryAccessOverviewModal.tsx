@@ -64,7 +64,6 @@ export function LibraryAccessOverviewModal({
         item.path,
         item.owner_name ?? '',
         ...item.direct_shares.map((share) => share.principal_name),
-        ...item.inherited_shares.map((share) => share.principal_name),
       ].some((value) => value.toLowerCase().includes(needle));
     });
   }, [overviewQuery.data, search]);
@@ -181,16 +180,6 @@ export function LibraryAccessOverviewModal({
                       </div>
                       <div className="text-white break-words">
                         {shareSummary(item.direct_shares, t)}
-                      </div>
-                    </div>
-                    <div className="rounded bg-bambu-dark p-2 min-w-0">
-                      <div className="text-bambu-gray mb-1">
-                        {t('fileManager.accessOverview.inheritedShares', {
-                          defaultValue: 'Inherited from parent folders',
-                        })}
-                      </div>
-                      <div className="text-white break-words">
-                        {shareSummary(item.inherited_shares, t)}
                       </div>
                     </div>
                   </div>

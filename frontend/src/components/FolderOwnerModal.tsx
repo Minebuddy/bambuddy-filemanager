@@ -151,7 +151,7 @@ export function FolderOwnerModal({ folder, onClose }: FolderOwnerModalProps) {
             <span>
               {t('fileManager.folderOwner.warning', {
                 defaultValue:
-                  'This changes folder ownership only. Files keep their existing owners, and external folders are not reassigned. Clearing ownership does not remove direct or inherited sharing; review access separately.',
+                  'This changes folder ownership only. Files keep their existing owners, and external folders are not reassigned. Clearing ownership does not remove direct sharing; review access separately.',
               })}
             </span>
           </div>

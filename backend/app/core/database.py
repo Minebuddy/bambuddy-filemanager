@@ -2016,6 +2016,65 @@ async def run_migrations(conn):
         "CREATE INDEX IF NOT EXISTS ix_library_folder_shares_group_id ON library_folder_shares (group_id)",
     )
 
+    # File sharing/access grants. Existing installs have no shares, so this
+    # is purely additive and preserves all ownership data.
+    await _safe_execute(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS library_file_shares (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_id INTEGER NOT NULL REFERENCES library_files(id) ON DELETE CASCADE,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE,
+            role VARCHAR(20) NOT NULL,
+            created_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT ck_library_file_shares_one_principal CHECK (
+                (user_id IS NOT NULL AND group_id IS NULL)
+                OR (user_id IS NULL AND group_id IS NOT NULL)
+            ),
+            CONSTRAINT ck_library_file_shares_role CHECK (
+                role IN ('viewer', 'contributor', 'manager')
+            ),
+            CONSTRAINT uq_library_file_share_user UNIQUE (file_id, user_id),
+            CONSTRAINT uq_library_file_share_group UNIQUE (file_id, group_id)
+        )
+        """
+        if is_sqlite()
+        else """
+        CREATE TABLE IF NOT EXISTS library_file_shares (
+            id SERIAL PRIMARY KEY,
+            file_id INTEGER NOT NULL REFERENCES library_files(id) ON DELETE CASCADE,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE,
+            role VARCHAR(20) NOT NULL,
+            created_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT ck_library_file_shares_one_principal CHECK (
+                (user_id IS NOT NULL AND group_id IS NULL)
+                OR (user_id IS NULL AND group_id IS NOT NULL)
+            ),
+            CONSTRAINT ck_library_file_shares_role CHECK (
+                role IN ('viewer', 'contributor', 'manager')
+            ),
+            CONSTRAINT uq_library_file_share_user UNIQUE (file_id, user_id),
+            CONSTRAINT uq_library_file_share_group UNIQUE (file_id, group_id)
+        )
+        """,
+    )
+    await _safe_execute(
+        conn,
+        "CREATE INDEX IF NOT EXISTS ix_library_file_shares_file_id ON library_file_shares (file_id)",
+    )
+    await _safe_execute(
+        conn,
+        "CREATE INDEX IF NOT EXISTS ix_library_file_shares_user_id ON library_file_shares (user_id)",
+    )
+    await _safe_execute(
+        conn,
+        "CREATE INDEX IF NOT EXISTS ix_library_file_shares_group_id ON library_file_shares (group_id)",
+    )
+
     # Existing PostgreSQL databases predate the finance ORM tables. These must
     # exist before any ALTER TABLE / CREATE INDEX statements below reference
     # them. Fresh installs remain idempotent because create_all() runs first.

@@ -10,7 +10,6 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import type { LibraryFolderTree } from '../api/client';
 import {
   librarySharingApi,
   type FolderShare,
@@ -21,7 +20,8 @@ import { useToast } from '../contexts/ToastContext';
 import { Button } from './Button';
 
 interface FolderSharingModalProps {
-  folder: LibraryFolderTree;
+  folder: { id: number; name: string };
+  kind?: 'folders' | 'files';
   onClose: () => void;
 }
 
@@ -33,7 +33,7 @@ const ROLE_OPTIONS: Array<{
   {
     value: 'viewer',
     label: 'Viewer',
-    description: 'Can see and use files, but cannot change the folder.',
+    description: 'Can view this item; files and subfolders are shared separately.',
   },
   {
     value: 'contributor',
@@ -43,11 +43,11 @@ const ROLE_OPTIONS: Array<{
   {
     value: 'manager',
     label: 'Manager',
-    description: 'Can view, add, rename, move, and delete shared content.',
+    description: 'Can manage this item; contained items need their own access.',
   },
 ];
 
-export function FolderSharingModal({ folder, onClose }: FolderSharingModalProps) {
+export function FolderSharingModal({ folder, onClose, kind = 'folders' }: FolderSharingModalProps) {
   const { t } = useTranslation();
   const { showToast } = useToast();
   const queryClient = useQueryClient();
@@ -58,12 +58,12 @@ export function FolderSharingModal({ folder, onClose }: FolderSharingModalProps)
   const [role, setRole] = useState<FolderShareRole>('viewer');
 
   const sharesQuery = useQuery({
-    queryKey: ['library-folder-shares', folder.id],
-    queryFn: () => librarySharingApi.getShares(folder.id),
+    queryKey: ['library-resource-shares', kind, folder.id],
+    queryFn: () => librarySharingApi.getShares(folder.id, kind),
   });
   const principalsQuery = useQuery({
-    queryKey: ['library-folder-share-principals', folder.id],
-    queryFn: () => librarySharingApi.getPrincipals(folder.id),
+    queryKey: ['library-resource-share-principals', kind, folder.id],
+    queryFn: () => librarySharingApi.getPrincipals(folder.id, kind),
   });
 
   const existingKeys = useMemo(
@@ -86,12 +86,13 @@ export function FolderSharingModal({ folder, onClose }: FolderSharingModalProps)
 
   const refresh = () => {
     queryClient.invalidateQueries({
-      queryKey: ['library-folder-shares', folder.id],
+      queryKey: ['library-resource-shares', kind, folder.id],
     });
     queryClient.invalidateQueries({ queryKey: ['library-folders'] });
     queryClient.invalidateQueries({ queryKey: ['library-files'] });
     queryClient.invalidateQueries({ queryKey: ['library-folder-access-overview'] });
     queryClient.invalidateQueries({ queryKey: ['library-stats'] });
+    queryClient.invalidateQueries({ queryKey: ['library-access-resources'] });
   };
 
   const upsertMutation = useMutation({
@@ -99,13 +100,13 @@ export function FolderSharingModal({ folder, onClose }: FolderSharingModalProps)
       principal_type: FolderSharePrincipalType;
       principal_id: number;
       role: FolderShareRole;
-    }) => librarySharingApi.upsertShare(folder.id, data),
+    }) => librarySharingApi.upsertShare(folder.id, data, kind),
     onSuccess: () => {
       refresh();
       setPrincipalId('');
       showToast(
         t('fileManager.sharing.saved', {
-          defaultValue: 'Folder access updated.',
+          defaultValue: 'Access updated.',
         }),
         'success',
       );
@@ -115,12 +116,12 @@ export function FolderSharingModal({ folder, onClose }: FolderSharingModalProps)
 
   const removeMutation = useMutation({
     mutationFn: (shareId: number) =>
-      librarySharingApi.deleteShare(folder.id, shareId),
+      librarySharingApi.deleteShare(folder.id, shareId, kind),
     onSuccess: () => {
       refresh();
       showToast(
         t('fileManager.sharing.removed', {
-          defaultValue: 'Folder access removed.',
+          defaultValue: 'Access removed.',
         }),
         'success',
       );
@@ -157,14 +158,14 @@ export function FolderSharingModal({ folder, onClose }: FolderSharingModalProps)
         <div className="p-4 space-y-5 overflow-y-auto">
           <div className="rounded border border-bambu-dark-tertiary bg-bambu-dark/40 p-3">
             <div className="text-sm font-medium text-white mb-1">
-              {t('fileManager.sharing.inheritanceTitle', {
-                defaultValue: 'Access is inherited by subfolders',
+              {t('fileManager.sharing.explicitTitle', {
+                defaultValue: 'Access applies only to this item',
               })}
             </div>
             <p className="text-xs text-bambu-gray">
-              {t('fileManager.sharing.inheritanceBody', {
+              {t('fileManager.sharing.explicitBody', {
                 defaultValue:
-                  'These grants apply to this folder and its descendants. Sharing does not transfer ownership of folders or files.',
+                  'Files and subfolders require their own shares. Parent folders appear only as navigation. Sharing does not transfer ownership.',
               })}
             </p>
           </div>
@@ -187,7 +188,7 @@ export function FolderSharingModal({ folder, onClose }: FolderSharingModalProps)
             ) : (sharesQuery.data?.length ?? 0) === 0 ? (
               <p className="text-sm text-bambu-gray py-2">
                 {t('fileManager.sharing.none', {
-                  defaultValue: 'This folder has no direct shares.',
+                  defaultValue: 'This item has no direct shares.',
                 })}
               </p>
             ) : (
@@ -221,7 +222,7 @@ export function FolderSharingModal({ folder, onClose }: FolderSharingModalProps)
                       disabled={upsertMutation.isPending}
                       className="bg-bambu-dark border border-bambu-dark-tertiary rounded px-2 py-1.5 text-sm text-white"
                     >
-                      {ROLE_OPTIONS.map((option) => (
+                      {ROLE_OPTIONS.filter(option => kind === 'folders' || option.value !== 'contributor').map((option) => (
                         <option key={option.value} value={option.value}>
                           {option.label}
                         </option>
@@ -297,7 +298,7 @@ export function FolderSharingModal({ folder, onClose }: FolderSharingModalProps)
                 }
                 className="bg-bambu-dark border border-bambu-dark-tertiary rounded px-2 py-2 text-sm text-white"
               >
-                {ROLE_OPTIONS.map((option) => (
+                {ROLE_OPTIONS.filter(option => kind === 'folders' || option.value !== 'contributor').map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>

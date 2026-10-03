@@ -177,6 +177,7 @@ class FolderTreeItem(BaseModel):
     external_readonly: bool = False
     file_count: int = 0
     access_role: FolderShareRole | None = None
+    navigation_only: bool = False
     # See FolderResponse.latest_activity_at — #1770 folder sort source.
     latest_activity_at: datetime | None = None
     children: list["FolderTreeItem"] = []
