@@ -1229,6 +1229,93 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
 
         assert response.status_code == 404
 
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_operator_cannot_extract_zip_into_other_users_folder(
+        self, async_client: AsyncClient, auth_setup, library_folder_factory
+    ):
+        import io
+        import zipfile
+
+        target = await library_folder_factory(
+            name="OtherZipDestination",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+        payload = io.BytesIO()
+        with zipfile.ZipFile(payload, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("model.txt", "hello")
+
+        response = await async_client.post(
+            f"/api/v1/library/files/extract-zip?folder_id={target.id}",
+            files={"file": ("models.zip", payload.getvalue(), "application/zip")},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_zip_created_folders_are_owned_by_operator(
+        self, async_client: AsyncClient, auth_setup, db_session
+    ):
+        import io
+        import zipfile
+
+        from sqlalchemy import select
+
+        from backend.app.models.library import LibraryFolder
+
+        payload = io.BytesIO()
+        with zipfile.ZipFile(payload, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("nested/model.txt", "hello")
+
+        response = await async_client.post(
+            "/api/v1/library/files/extract-zip"
+            "?create_folder_from_zip=true&preserve_structure=true",
+            files={"file": ("OwnedBundle.zip", payload.getvalue(), "application/zip")},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 200
+        db_session.expire_all()
+        folders = (
+            await db_session.execute(
+                select(LibraryFolder).where(
+                    LibraryFolder.name.in_(["OwnedBundle", "nested"])
+                )
+            )
+        ).scalars().all()
+        assert len(folders) == 2
+        assert {folder.created_by_id for folder in folders} == {
+            auth_setup["operator_user"]["id"]
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_makerworld_recent_imports_are_scoped_to_operator(
+        self, async_client: AsyncClient, auth_setup, library_file_factory
+    ):
+        own = await library_file_factory(
+            filename="mine.3mf",
+            created_by_id=auth_setup["operator_user"]["id"],
+            source_type="makerworld",
+            source_url="https://makerworld.com/models/own",
+        )
+        await library_file_factory(
+            filename="theirs.3mf",
+            created_by_id=auth_setup["operator2_user"]["id"],
+            source_type="makerworld",
+            source_url="https://makerworld.com/models/theirs",
+        )
+
+        response = await async_client.get(
+            "/api/v1/makerworld/recent-imports",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 200
+        assert {item["library_file_id"] for item in response.json()} == {own.id}
+
     # ========================================================================
     # Folder update/delete ownership (#3201)
     # ========================================================================
