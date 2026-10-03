@@ -1,0 +1,39 @@
+name: TEMP Format Library Access Branch
+
+on:
+  push:
+    branches: [feature/library-access-control]
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feature/library-access-control
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install pinned Ruff
+        run: pip install "$(grep -E '^ruff==' requirements-dev.txt)"
+
+      - name: Format changed Python files
+        run: |
+          ruff format             backend/app/api/routes/library.py             backend/app/api/routes/makerworld.py             backend/tests/integration/test_ownership_permissions.py
+
+      - name: Commit formatting if needed
+        run: |
+          if git diff --quiet; then
+            echo "No formatting changes needed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add             backend/app/api/routes/library.py             backend/app/api/routes/makerworld.py             backend/tests/integration/test_ownership_permissions.py
+          git commit -m "Format library access changes with Ruff"
+          git push origin HEAD:feature/library-access-control
