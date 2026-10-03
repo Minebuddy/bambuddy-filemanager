@@ -67,6 +67,7 @@ import type {
   AppSettings,
   Archive,
   Permission,
+  LibraryAccessRole,
 } from '../api/client';
 import { Button } from '../components/Button';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -820,21 +821,23 @@ function FolderActionsMenu({ folder, onDelete, onLink, onRename, onManageOwner, 
     // moved elsewhere (click-outside, the columns pane) is left alone.
     if (rootRef.current?.contains(document.activeElement)) buttonRef.current?.focus();
   };
-  const hasChildren = folder.children.length > 0;
   const isLinked = folder.project_id || folder.archive_id;
   const isExternal = folder.is_external;
-  // #1781: users with only library:delete_own may delete empty, unlinked,
-  // non-external folders. The backend enforces the same rule and additionally
-  // counts trashed files (invisible here), so a 403 can still come back.
+  const hasManagerAccess = isAdmin || folder.access_role === 'manager';
   const canDeleteFolder =
     hasPermission('library:delete_all') ||
-    (hasPermission('library:delete_own') && folder.file_count === 0 && !hasChildren && !isExternal && !isLinked);
+    (
+      hasPermission('library:delete_own') &&
+      hasManagerAccess &&
+      !isExternal &&
+      !isLinked
+    );
   const deleteDisabledTooltip = canDeleteFolder
     ? undefined
-    : hasPermission('library:delete_own') && !isExternal && !isLinked
-      ? t('fileManager.onlyEmptyFoldersDeletable')
-      : t('fileManager.noPermissionDeleteFolder');
-  const canRename = hasPermission('library:update_all');
+    : t('fileManager.noPermissionDeleteFolder');
+  const canRename =
+    hasPermission('library:update_all') ||
+    (hasPermission('library:update_own') && hasManagerAccess);
   const canManageAccess =
     !isExternal &&
     hasPermission('library:share') &&
@@ -1066,7 +1069,12 @@ interface FileCardProps {
   onTagClick?: (tagId: number) => void;
   thumbnailVersion?: number;
   hasPermission: (permission: Permission) => boolean;
-  canModify: (resource: 'queue' | 'archives' | 'library', action: 'update' | 'delete' | 'reprint', createdById: number | null | undefined) => boolean;
+  canModify: (
+    resource: 'queue' | 'archives' | 'library',
+    action: 'update' | 'delete' | 'reprint',
+    createdById: number | null | undefined,
+    accessRole?: LibraryAccessRole | null,
+  ) => boolean;
   authEnabled: boolean;
   showModified: boolean;
   t: TFunction;
@@ -1081,8 +1089,8 @@ function FileCard({ file, isSelected, onSelect, onDelete, onDownload, onPrint, o
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number } | null>(null);
 
   const canPreview3d = hasPermission('library:read');
-  const canRename = canModify('library', 'update', file.created_by_id);
-  const canDelete = canModify('library', 'delete', file.created_by_id);
+  const canRename = canModify('library', 'update', file.created_by_id, file.access_role);
+  const canDelete = canModify('library', 'delete', file.created_by_id, file.access_role);
 
   const menuItems: ContextMenuItem[] = [];
   if (onPrint && isSlicedLibraryFile(file)) {
@@ -1372,7 +1380,12 @@ interface FileActionStripProps {
   thumbnailPending: boolean;
   onDelete: (id: number) => void;
   hasPermission: (permission: Permission) => boolean;
-  canModify: (resource: 'queue' | 'archives' | 'library', action: 'update' | 'delete' | 'reprint', createdById: number | null | undefined) => boolean;
+  canModify: (
+    resource: 'queue' | 'archives' | 'library',
+    action: 'update' | 'delete' | 'reprint',
+    createdById: number | null | undefined,
+    accessRole?: LibraryAccessRole | null,
+  ) => boolean;
   // Roving tabindex for the columns view: only the focused row's buttons take
   // part in the Tab order, so Tab from the pane lands on that row's actions.
   tabIndex?: number;
@@ -1380,8 +1393,8 @@ interface FileActionStripProps {
 }
 
 function FileActionStrip({ file, onPrint, onSlice, onOpenInSlicer, onRunPipeline, useSlicerApi, desktopSlicer, canSlice, onPreview, onDetails, onDownload, onRename, onGenerateThumbnail, thumbnailPending, onDelete, hasPermission, canModify, tabIndex, t }: FileActionStripProps) {
-  const canRename = canModify('library', 'update', file.created_by_id);
-  const canDelete = canModify('library', 'delete', file.created_by_id);
+  const canRename = canModify('library', 'update', file.created_by_id, file.access_role);
+  const canDelete = canModify('library', 'delete', file.created_by_id, file.access_role);
   return (
     <div className="flex items-center gap-1" data-file-actions {...stopRowActivation}>
       {isSlicedLibraryFile(file) && (
@@ -2234,6 +2247,27 @@ export function FileManagerPage() {
   // the modal's own drop zone don't bubble up and flash the page overlay
   // behind it.
   const canUpload = hasPermission('library:upload');
+
+  const canModifyWithAccess = useCallback(
+    (
+      resource: 'queue' | 'archives' | 'library',
+      action: 'update' | 'delete' | 'reprint',
+      createdById: number | null | undefined,
+      accessRole?: LibraryAccessRole | null,
+    ): boolean => {
+      if (canModify(resource, action, createdById)) return true;
+      if (resource !== 'library' || accessRole !== 'manager') return false;
+      if (action === 'update') {
+        return hasAnyPermission('library:update_own', 'library:update_all');
+      }
+      if (action === 'delete') {
+        return hasAnyPermission('library:delete_own', 'library:delete_all');
+      }
+      return false;
+    },
+    [canModify, hasAnyPermission],
+  );
+
   const { isDraggingOver, dragHandlers } = usePageFileDrop({
     disabled: !canUpload || showUploadModal,
     onFiles: (files) => {
@@ -2248,7 +2282,7 @@ export function FileManagerPage() {
   const previewSnapshotHandler = useCallback(
     (file: LibraryFileListItem): ((blob: Blob) => void) | undefined => {
       if (file.thumbnail_path) return undefined;
-      if (!canModify('library', 'update', file.created_by_id)) return undefined;
+      if (!canModifyWithAccess('library', 'update', file.created_by_id, file.access_role)) return undefined;
       return (blob: Blob) => {
         api
           .uploadLibraryPreviewThumbnail(file.id, blob)
@@ -2263,7 +2297,7 @@ export function FileManagerPage() {
           });
       };
     },
-    [canModify, queryClient]
+    [canModifyWithAccess, queryClient]
   );
 
   const handleDownload = (id: number) => {
@@ -2307,7 +2341,7 @@ export function FileManagerPage() {
     thumbnailPending: singleThumbnailMutation.isPending,
     onDelete: (id: number) => setDeleteConfirm({ type: 'file', id }),
     hasPermission,
-    canModify,
+    canModify: canModifyWithAccess,
     t,
   };
 
@@ -4083,7 +4117,7 @@ export function FileManagerPage() {
       {detailsFile && (
         <LibraryFileDetailsModal
           file={detailsFile}
-          canEdit={canModify('library', 'update', detailsFile.created_by_id)}
+          canEdit={canModifyWithAccess('library', 'update', detailsFile.created_by_id, detailsFile.access_role)}
           onClose={() => setDetailsFile(null)}
         />
       )}

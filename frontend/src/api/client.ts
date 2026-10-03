@@ -8328,6 +8328,8 @@ export interface StorageUsageResponse {
 }
 
 // Library (File Manager) types
+export type LibraryAccessRole = 'viewer' | 'contributor' | 'manager';
+
 export interface LibraryFolderTree {
   id: number;
   name: string;
@@ -8341,6 +8343,7 @@ export interface LibraryFolderTree {
   external_path: string | null;
   external_readonly: boolean;
   file_count: number;
+  access_role?: LibraryAccessRole | null;
   // max(folder.updated_at, max(immediate-child file.updated_at)). Used by
   // the File Manager folder tree's "sort by recent activity" mode (#1770).
   latest_activity_at: string | null;
@@ -8361,6 +8364,7 @@ export interface LibraryFolder {
   external_readonly: boolean;
   external_show_hidden: boolean;
   file_count: number;
+  access_role?: LibraryAccessRole | null;
   latest_activity_at: string | null;
   created_at: string;
   updated_at: string;
@@ -8420,6 +8424,7 @@ export interface LibraryFile {
   source_url: string | null;
   duplicates: LibraryFileDuplicate[] | null;
   duplicate_count: number;
+  access_role?: LibraryAccessRole | null;
   // User tracking (Issue #206)
   created_by_id: number | null;
   created_by_username: string | null;
