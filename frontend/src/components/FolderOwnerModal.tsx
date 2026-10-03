@@ -8,6 +8,8 @@ import { libraryOwnershipApi } from '../api/libraryOwnership';
 import { useToast } from '../contexts/ToastContext';
 import { Button } from './Button';
 
+const UNASSIGNED_OWNER = '__unassigned__';
+
 interface FolderOwnerModalProps {
   folder: LibraryFolderTree;
   onClose: () => void;
@@ -19,7 +21,7 @@ export function FolderOwnerModal({ folder, onClose }: FolderOwnerModalProps) {
   const queryClient = useQueryClient();
   const [selectedOwnerId, setSelectedOwnerId] = useState(
     folder.created_by_id === null || folder.created_by_id === undefined
-      ? ''
+      ? UNASSIGNED_OWNER
       : String(folder.created_by_id),
   );
   const [recursive, setRecursive] = useState(false);
@@ -46,7 +48,7 @@ export function FolderOwnerModal({ folder, onClose }: FolderOwnerModalProps) {
   const mutation = useMutation({
     mutationFn: () =>
       libraryOwnershipApi.updateFolderOwner(folder.id, {
-        created_by_id: selectedOwnerId === '' ? null : Number(selectedOwnerId),
+        created_by_id: selectedOwnerId === UNASSIGNED_OWNER ? null : Number(selectedOwnerId),
         recursive,
       }),
     onSuccess: (result) => {
@@ -114,7 +116,7 @@ export function FolderOwnerModal({ folder, onClose }: FolderOwnerModalProps) {
               aria-label={t('fileManager.folderOwner.newOwner', { defaultValue: 'New owner' })}
               className="w-full bg-bambu-dark border border-bambu-dark-tertiary rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-bambu-green"
             >
-              <option value="">
+              <option value={UNASSIGNED_OWNER}>
                 {t('fileManager.folderOwner.unassigned', {
                   defaultValue: 'Unassigned / admin-only',
                 })}

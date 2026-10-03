@@ -49,6 +49,7 @@ describe('FolderOwnerModal', () => {
     render(<FolderOwnerModal folder={folder} onClose={onClose} />);
 
     const select = await screen.findByRole('listbox', { name: 'New owner' });
+    await screen.findByRole('option', { name: 'student-a' });
     await user.selectOptions(select, '7');
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -83,7 +84,8 @@ describe('FolderOwnerModal', () => {
     );
 
     const select = await screen.findByRole('listbox', { name: 'New owner' });
-    await user.selectOptions(select, '');
+    await screen.findByRole('option', { name: 'student-a' });
+    await user.selectOptions(select, '__unassigned__');
     await user.click(
       screen.getByRole('checkbox', {
         name: 'Apply the same owner to all internal subfolders',
