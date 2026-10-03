@@ -11,6 +11,7 @@ import {
   Download,
   ExternalLink,
   MoreVertical,
+  Share2,
   ChevronRight,
   FolderPlus,
   FileBox,
@@ -79,6 +80,7 @@ import { BulkTagsPickerModal } from '../components/BulkTagsPickerModal';
 import { FileUploadModal } from '../components/FileUploadModal';
 import { FolderReadmePanel } from '../components/FolderReadmePanel';
 import { FolderOwnerModal } from '../components/FolderOwnerModal';
+import { FolderSharingModal } from '../components/FolderSharingModal';
 import { LibraryTagsModal } from '../components/LibraryTagsModal';
 import { LibraryFileDetailsModal } from '../components/LibraryFileDetailsModal';
 import { PurgeOldFilesModal } from '../components/PurgeOldFilesModal';
@@ -772,6 +774,8 @@ interface FolderTreeItemProps {
   onLink: (folder: LibraryFolderTree) => void;
   onRename: (folder: LibraryFolderTree) => void;
   onManageOwner: (folder: LibraryFolderTree) => void;
+  onManageAccess: (folder: LibraryFolderTree) => void;
+  currentUserId: number | null;
   isAdmin: boolean;
   depth?: number;
   wrapNames?: boolean;
@@ -803,7 +807,7 @@ interface FolderActionsMenuProps {
   t: TFunction;
 }
 
-function FolderActionsMenu({ folder, onDelete, onLink, onRename, onManageOwner, isAdmin, hasPermission, revealOnHover = false, tabIndex, t }: FolderActionsMenuProps) {
+function FolderActionsMenu({ folder, onDelete, onLink, onRename, onManageOwner, onManageAccess, currentUserId, isAdmin, hasPermission, revealOnHover = false, tabIndex, t }: FolderActionsMenuProps) {
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -829,6 +833,10 @@ function FolderActionsMenu({ folder, onDelete, onLink, onRename, onManageOwner, 
       ? t('fileManager.onlyEmptyFoldersDeletable')
       : t('fileManager.noPermissionDeleteFolder');
   const canRename = hasPermission('library:update_all');
+  const canManageAccess =
+    !isExternal &&
+    hasPermission('library:share') &&
+    (isAdmin || (currentUserId !== null && folder.created_by_id === currentUserId));
 
   const items: ContextMenuItem[] = [
     {
@@ -845,6 +853,13 @@ function FolderActionsMenu({ folder, onDelete, onLink, onRename, onManageOwner, 
       disabled: !canRename,
       title: !canRename ? t('fileManager.noPermissionLinkFolder') : undefined,
     },
+    ...(canManageAccess
+      ? [{
+          label: t('fileManager.sharing.manage', { defaultValue: 'Manage access' }),
+          icon: <Share2 className="w-3.5 h-3.5" />,
+          onClick: () => onManageAccess(folder),
+        }]
+      : []),
     ...(isAdmin && !isExternal
       ? [{
           label: t('fileManager.folderOwner.manage', { defaultValue: 'Manage owner' }),
@@ -899,7 +914,7 @@ function FolderActionsMenu({ folder, onDelete, onLink, onRename, onManageOwner, 
   );
 }
 
-function FolderTreeItem({ folder, selectedFolderId, onSelect, onDelete, onLink, onRename, onManageOwner, isAdmin, depth = 0, wrapNames = false, defaultExpanded = true, showModified = false, hasPermission, t }: FolderTreeItemProps) {
+function FolderTreeItem({ folder, selectedFolderId, onSelect, onDelete, onLink, onRename, onManageOwner, onManageAccess, currentUserId, isAdmin, depth = 0, wrapNames = false, defaultExpanded = true, showModified = false, hasPermission, t }: FolderTreeItemProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const hasChildren = folder.children.length > 0;
   const isLinked = folder.project_id || folder.archive_id;
@@ -988,6 +1003,8 @@ function FolderTreeItem({ folder, selectedFolderId, onSelect, onDelete, onLink, 
           onLink={onLink}
           onRename={onRename}
           onManageOwner={onManageOwner}
+          onManageAccess={onManageAccess}
+          currentUserId={currentUserId}
           isAdmin={isAdmin}
           hasPermission={hasPermission}
           revealOnHover={!wrapNames}
@@ -1006,6 +1023,8 @@ function FolderTreeItem({ folder, selectedFolderId, onSelect, onDelete, onLink, 
               onLink={onLink}
               onRename={onRename}
               onManageOwner={onManageOwner}
+              onManageAccess={onManageAccess}
+              currentUserId={currentUserId}
               isAdmin={isAdmin}
               depth={depth + 1}
               wrapNames={wrapNames}
@@ -1589,7 +1608,7 @@ export function FileManagerPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const { hasPermission, hasAnyPermission, canModify, authEnabled, isAdmin } = useAuth();
+  const { user, hasPermission, hasAnyPermission, canModify, authEnabled, isAdmin } = useAuth();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
@@ -1619,6 +1638,7 @@ export function FileManagerPage() {
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [linkFolder, setLinkFolder] = useState<LibraryFolderTree | null>(null);
   const [ownerFolder, setOwnerFolder] = useState<LibraryFolderTree | null>(null);
+  const [sharingFolder, setSharingFolder] = useState<LibraryFolderTree | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'file' | 'folder' | 'bulk'; id: number; count?: number } | null>(null);
   const [printFile, setPrintFile] = useState<LibraryFileListItem | null>(null);
   const [sliceFile, setSliceFile] = useState<LibraryFileListItem | null>(null);
@@ -3030,6 +3050,8 @@ export function FileManagerPage() {
                 onLink={setLinkFolder}
                 onRename={(f) => setRenameItem({ type: 'folder', id: f.id, name: f.name })}
                 onManageOwner={setOwnerFolder}
+                onManageAccess={setSharingFolder}
+                currentUserId={user?.id ?? null}
                 isAdmin={isAdmin}
                 wrapNames={wrapFolderNames}
                 defaultExpanded={!collapseFoldersByDefault}
@@ -3493,6 +3515,8 @@ export function FileManagerPage() {
                             onLink={setLinkFolder}
                             onRename={(f) => setRenameItem({ type: 'folder', id: f.id, name: f.name })}
                             onManageOwner={setOwnerFolder}
+                            onManageAccess={setSharingFolder}
+                            currentUserId={user?.id ?? null}
                             isAdmin={isAdmin}
                             hasPermission={hasPermission}
                             revealOnHover={!isSelectedFolder}
@@ -3890,6 +3914,13 @@ export function FileManagerPage() {
         <FolderOwnerModal
           folder={ownerFolder}
           onClose={() => setOwnerFolder(null)}
+        />
+      )}
+
+      {sharingFolder && hasPermission('library:share') && (
+        <FolderSharingModal
+          folder={sharingFolder}
+          onClose={() => setSharingFolder(null)}
         />
       )}
 
