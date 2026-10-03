@@ -1810,6 +1810,133 @@ async def _migrate_failure_reason_vocabulary(conn):
         logger.info("[#2974] converted %d failure_reason value(s) to the canonical vocabulary", total)
 
 
+async def _migrate_library_folder_owners(conn) -> int:
+    """Infer legacy folder owners from the files contained in each subtree.
+
+    Folder ownership was added after file ownership. Upgraded/restored
+    databases therefore have library_folders.created_by_id = NULL even when
+    every file beneath a folder already belongs to the same user.
+
+    Backfill only when the evidence is unambiguous:
+      * the folder is not an external/system mount;
+      * the subtree contains at least one file;
+      * every file in the subtree has a non-null owner; and
+      * all files in the subtree have the same owner.
+
+    Mixed-owner, ownerless-file and empty legacy folders stay NULL. Existing
+    folder ownership is never overwritten. The operation is idempotent.
+    """
+    from collections import defaultdict
+
+    from sqlalchemy import text
+
+    folder_rows = (
+        await conn.execute(
+            text(
+                "SELECT id, parent_id, is_external, created_by_id "
+                "FROM library_folders"
+            )
+        )
+    ).fetchall()
+    if not folder_rows:
+        return 0
+
+    file_rows = (
+        await conn.execute(
+            text(
+                "SELECT folder_id, created_by_id "
+                "FROM library_files WHERE folder_id IS NOT NULL"
+            )
+        )
+    ).fetchall()
+
+    children: dict[int, list[int]] = defaultdict(list)
+    folder_state: dict[int, tuple[int | None, bool, int | None]] = {}
+    for folder_id, parent_id, is_external, created_by_id in folder_rows:
+        fid = int(folder_id)
+        folder_state[fid] = (
+            int(parent_id) if parent_id is not None else None,
+            bool(is_external),
+            int(created_by_id) if created_by_id is not None else None,
+        )
+        if parent_id is not None:
+            children[int(parent_id)].append(fid)
+
+    direct_owners: dict[int, set[int]] = defaultdict(set)
+    has_ownerless_file: set[int] = set()
+    has_any_file: set[int] = set()
+
+    for folder_id, created_by_id in file_rows:
+        fid = int(folder_id)
+        has_any_file.add(fid)
+        if created_by_id is None:
+            has_ownerless_file.add(fid)
+        else:
+            direct_owners[fid].add(int(created_by_id))
+
+    memo: dict[int, tuple[set[int], bool, bool]] = {}
+    cycle_nodes: set[int] = set()
+
+    def subtree_evidence(
+        folder_id: int, visiting: set[int]
+    ) -> tuple[set[int], bool, bool]:
+        if folder_id in memo:
+            owners, ownerless, has_file = memo[folder_id]
+            return set(owners), ownerless, has_file
+        if folder_id in visiting:
+            cycle_nodes.add(folder_id)
+            return set(), True, False
+
+        visiting.add(folder_id)
+        owners = set(direct_owners.get(folder_id, set()))
+        ownerless = folder_id in has_ownerless_file
+        has_file = folder_id in has_any_file
+
+        for child_id in children.get(folder_id, []):
+            child_owners, child_ownerless, child_has_file = subtree_evidence(
+                child_id, visiting
+            )
+            owners.update(child_owners)
+            ownerless = ownerless or child_ownerless
+            has_file = has_file or child_has_file
+
+        visiting.remove(folder_id)
+        memo[folder_id] = (set(owners), ownerless, has_file)
+        return owners, ownerless, has_file
+
+    updates: list[dict[str, int]] = []
+    for folder_id, (_parent_id, is_external, created_by_id) in folder_state.items():
+        if created_by_id is not None or is_external:
+            continue
+        owners, ownerless, has_file = subtree_evidence(folder_id, set())
+        if has_file and not ownerless and len(owners) == 1:
+            updates.append(
+                {"folder_id": folder_id, "owner_id": next(iter(owners))}
+            )
+
+    if updates:
+        await conn.execute(
+            text(
+                "UPDATE library_folders "
+                "SET created_by_id = :owner_id "
+                "WHERE id = :folder_id AND created_by_id IS NULL"
+            ),
+            updates,
+        )
+        logger.info(
+            "Backfilled ownership for %d legacy library folder(s) from file ownership",
+            len(updates),
+        )
+
+    if cycle_nodes:
+        logger.warning(
+            "Skipped ownership inference for malformed cyclic library folder relationships: %s",
+            sorted(cycle_nodes),
+        )
+
+    return len(updates)
+
+
 async def run_migrations(conn):
     """Run all schema migrations and data backfills on startup.
 
@@ -1826,8 +1953,8 @@ async def run_migrations(conn):
 
     # Migration: add ownership tracking to library folders (#3201). Fresh
     # installs get this from the ORM model; upgraded installs need the nullable
-    # FK added in place. Existing rows intentionally remain NULL because the
-    # historical creator cannot be determined reliably.
+    # FK added in place. A conservative data backfill below recovers ownership
+    # only when every file in a legacy folder subtree points to one same user.
     await _safe_execute(
         conn,
         "ALTER TABLE library_folders ADD COLUMN created_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL",
@@ -1836,6 +1963,8 @@ async def run_migrations(conn):
         conn,
         "CREATE INDEX IF NOT EXISTS ix_library_folders_created_by_id ON library_folders (created_by_id)",
     )
+
+    await _migrate_library_folder_owners(conn)
 
     # Existing PostgreSQL databases predate the finance ORM tables. These must
     # exist before any ALTER TABLE / CREATE INDEX statements below reference
