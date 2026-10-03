@@ -8452,6 +8452,7 @@ export interface LibraryFileListItem {
   thumbnail_path: string | null;
   print_count: number;
   duplicate_count: number;
+  access_role?: LibraryAccessRole | null;
   // User tracking (Issue #206)
   created_by_id: number | null;
   created_by_username: string | null;
