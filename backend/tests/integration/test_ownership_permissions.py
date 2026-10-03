@@ -8,6 +8,9 @@ Tests the ownership permission model where users can have:
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
+
+from backend.app.models.library import LibraryFile, LibraryFolder
 
 
 class TestOwnershipPermissionsSetup:
