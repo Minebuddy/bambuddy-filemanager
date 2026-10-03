@@ -1780,46 +1780,38 @@ async def _restricted_owned_folder_delete_blocker(
     folder: LibraryFolder,
     user: User,
 ) -> str | None:
-    """Return why an own-scoped caller may not cascade-delete this folder.
+    """Return why a scoped caller may not cascade-delete this folder.
 
-    The root folder, every descendant folder and every contained file (including
-    trashed files) must belong to the caller. This prevents an owned parent from
-    becoming a way to cascade-delete another user's rows.
+    Manager access must cover every folder in the subtree. This lets a manager
+    administer collaboratively uploaded files while preventing a shared/owned
+    parent from becoming a way to cascade-delete a private child folder.
     """
-    if folder.created_by_id != user.id:
-        return "Folder is not owned by the current user"
+
+    roles = await folder_access_roles(db, user)
+    if not role_allows(roles.get(folder.id), "manager"):
+        return "Manager access is required to delete this folder"
     if folder.is_external:
         return "External folders can only be deleted by users with library:delete_all"
     if folder.project_id is not None or folder.archive_id is not None:
         return "Folders linked to a project or archive can only be deleted by users with library:delete_all"
 
-    folder_ids = [folder.id]
     queue = [folder.id]
     while queue:
         parent_id = queue.pop()
         children_result = await db.execute(
             select(
                 LibraryFolder.id,
-                LibraryFolder.created_by_id,
                 LibraryFolder.is_external,
                 LibraryFolder.project_id,
                 LibraryFolder.archive_id,
             ).where(LibraryFolder.parent_id == parent_id)
         )
-        for child_id, owner_id, is_external, project_id, archive_id in children_result.all():
-            if owner_id != user.id:
-                return "Folder tree contains a subfolder owned by another user"
+        for child_id, is_external, project_id, archive_id in children_result.all():
+            if not role_allows(roles.get(child_id), "manager"):
+                return "Folder tree contains a subfolder without manager access"
             if is_external or project_id is not None or archive_id is not None:
                 return "Folder tree contains a protected external or linked subfolder"
-            folder_ids.append(child_id)
             queue.append(child_id)
-
-    files_result = await db.execute(
-        select(LibraryFile.id, LibraryFile.created_by_id).where(LibraryFile.folder_id.in_(folder_ids))
-    )
-    for _, owner_id in files_result.all():
-        if owner_id != user.id:
-            return "Folder tree contains a file not owned by the current user"
 
     return None
 
@@ -6367,7 +6359,9 @@ async def bulk_delete(
         file = result.scalar_one_or_none()
         if not file:
             continue
-        if not can_modify_all and file.created_by_id != user.id:
+        try:
+            await _require_file_role(db, file, user, can_modify_all, "manager")
+        except HTTPException:
             skipped_files += 1
             continue
 
