@@ -42,6 +42,13 @@ class FolderOwnerUpdate(BaseModel):
     recursive: bool = False
 
 
+class FolderOwnerResponse(BaseModel):
+    """Current owner of one library folder."""
+
+    id: int
+    created_by_id: int | None
+
+
 class FolderOwnerUpdateResponse(BaseModel):
     """Result of an admin folder ownership reassignment."""
 
@@ -55,7 +62,6 @@ class FolderResponse(BaseModel):
 
     id: int
     name: str
-    created_by_id: int | None = None
     parent_id: int | None
     project_id: int | None = None
     archive_id: int | None = None
@@ -97,7 +103,6 @@ class FolderTreeItem(BaseModel):
 
     id: int
     name: str
-    created_by_id: int | None = None
     parent_id: int | None
     project_id: int | None = None
     archive_id: int | None = None
