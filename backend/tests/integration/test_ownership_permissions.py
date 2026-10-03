@@ -1755,6 +1755,91 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_variant_group_respects_shared_folder_role(
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        library_folder_factory,
+        library_file_factory,
+    ):
+        folder = await library_folder_factory(
+            name="SharedVariants",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+        h2s = await library_file_factory(
+            filename="shared-h2s.gcode.3mf",
+            file_type="gcode.3mf",
+            folder_id=folder.id,
+            created_by_id=auth_setup["operator2_user"]["id"],
+            file_metadata={"sliced_for_model": "H2S"},
+        )
+        h2c = await library_file_factory(
+            filename="shared-h2c.gcode.3mf",
+            file_type="gcode.3mf",
+            folder_id=folder.id,
+            created_by_id=auth_setup["operator2_user"]["id"],
+            file_metadata={"sliced_for_model": "H2C"},
+        )
+
+        group = await async_client.post(
+            "/api/v1/library/variant-groups",
+            json={
+                "name": "shared-job",
+                "members": [
+                    {"library_file_id": h2s.id},
+                    {"library_file_id": h2c.id},
+                ],
+            },
+            headers={"Authorization": f"Bearer {auth_setup['operator2_token']}"},
+        )
+        assert group.status_code == 201
+        group_id = group.json()["id"]
+
+        viewer_share = await async_client.put(
+            f"/api/v1/library/folders/{folder.id}/shares",
+            json={
+                "principal_type": "user",
+                "principal_id": auth_setup["operator_user"]["id"],
+                "role": "viewer",
+            },
+            headers={"Authorization": f"Bearer {auth_setup['operator2_token']}"},
+        )
+        assert viewer_share.status_code == 200
+
+        visible = await async_client.get(
+            f"/api/v1/library/variant-groups/{group_id}",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert visible.status_code == 200
+
+        denied = await async_client.patch(
+            f"/api/v1/library/variant-groups/{group_id}",
+            json={"name": "viewer-cannot-rename"},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert denied.status_code == 404
+
+        manager_share = await async_client.put(
+            f"/api/v1/library/folders/{folder.id}/shares",
+            json={
+                "principal_type": "user",
+                "principal_id": auth_setup["operator_user"]["id"],
+                "role": "manager",
+            },
+            headers={"Authorization": f"Bearer {auth_setup['operator2_token']}"},
+        )
+        assert manager_share.status_code == 200
+
+        allowed = await async_client.patch(
+            f"/api/v1/library/variant-groups/{group_id}",
+            json={"name": "manager-renamed"},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert allowed.status_code == 200
+        assert allowed.json()["name"] == "manager-renamed"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_removing_direct_share_revokes_access(
         self,
         async_client: AsyncClient,
