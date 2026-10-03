@@ -1826,7 +1826,7 @@ async def _migrate_library_folder_owners(conn) -> int:
     Mixed-owner, ownerless-file and empty legacy folders stay NULL. Existing
     folder ownership is never overwritten. The operation is idempotent.
     """
-    from collections import defaultdict
+    from collections import defaultdict, deque
 
     from sqlalchemy import text
 
@@ -1869,37 +1869,35 @@ async def _migrate_library_folder_owners(conn) -> int:
         else:
             direct_owners[fid].add(int(created_by_id))
 
-    memo: dict[int, tuple[set[int], bool, bool]] = {}
-    cycle_nodes: set[int] = set()
-
-    def subtree_evidence(folder_id: int, visiting: set[int]) -> tuple[set[int], bool, bool]:
-        if folder_id in memo:
-            owners, ownerless, has_file = memo[folder_id]
-            return set(owners), ownerless, has_file
-        if folder_id in visiting:
-            cycle_nodes.add(folder_id)
-            return set(), True, False
-
-        visiting.add(folder_id)
-        owners = set(direct_owners.get(folder_id, set()))
-        ownerless = folder_id in has_ownerless_file
-        has_file = folder_id in has_any_file
-
-        for child_id in children.get(folder_id, []):
-            child_owners, child_ownerless, child_has_file = subtree_evidence(child_id, visiting)
-            owners.update(child_owners)
-            ownerless = ownerless or child_ownerless
-            has_file = has_file or child_has_file
-
-        visiting.remove(folder_id)
-        memo[folder_id] = (set(owners), ownerless, has_file)
-        return owners, ownerless, has_file
+    # Fold evidence from leaves toward parents. Nodes remaining after the
+    # queue drains are cyclic and must never be used to infer ownership.
+    memo = {
+        fid: (set(direct_owners.get(fid, set())), fid in has_ownerless_file, fid in has_any_file)
+        for fid in folder_state
+    }
+    pending_children = {fid: len(children.get(fid, [])) for fid in folder_state}
+    ready = deque(fid for fid, count in pending_children.items() if count == 0)
+    processed: set[int] = set()
+    while ready:
+        fid = ready.popleft()
+        processed.add(fid)
+        parent_id = folder_state[fid][0]
+        if parent_id not in folder_state:
+            continue
+        owners, ownerless, has_file = memo[fid]
+        parent_owners, parent_ownerless, parent_has_file = memo[parent_id]
+        parent_owners.update(owners)
+        memo[parent_id] = (parent_owners, parent_ownerless or ownerless, parent_has_file or has_file)
+        pending_children[parent_id] -= 1
+        if pending_children[parent_id] == 0:
+            ready.append(parent_id)
+    cycle_nodes = set(folder_state) - processed
 
     updates: list[dict[str, int]] = []
     for folder_id, (_parent_id, is_external, created_by_id) in folder_state.items():
-        if created_by_id is not None or is_external or folder_id in reviewed_ids:
+        if created_by_id is not None or is_external or folder_id in reviewed_ids or folder_id in cycle_nodes:
             continue
-        owners, ownerless, has_file = subtree_evidence(folder_id, set())
+        owners, ownerless, has_file = memo[folder_id]
         if has_file and not ownerless and len(owners) == 1:
             updates.append({"folder_id": folder_id, "owner_id": next(iter(owners))})
 
@@ -1924,19 +1922,14 @@ async def _migrate_library_folder_owners(conn) -> int:
     return len(updates)
 
 
-async def run_migrations(conn):
-    """Run all schema migrations and data backfills on startup.
-
-    Includes ALTER TABLE (add columns, rename columns, add constraints),
-    CREATE INDEX, CREATE TRIGGER, data UPDATE backfills, and table recreations
-    for complex SQLite schema changes that ALTER TABLE cannot handle.
-
-    DDL statements are wrapped in _safe_execute for idempotency.
-    DML backfills (UPDATE/DELETE) are executed directly via conn.execute()
-    inside begin_nested() so any failure is always fatal and never silently
-    swallowed.
-    """
-    from sqlalchemy import text
+async def _migrate_library_ownership_schema(conn) -> int:
+    """Add ownership columns in dependency order before inferring folder owners."""
+    # File ownership predates folder ownership, but restored databases may
+    # still lack it. Add it before the folder backfill reads the column.
+    await _safe_execute(
+        conn,
+        "ALTER TABLE library_files ADD COLUMN created_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL",
+    )
 
     # Migration: add ownership tracking to library folders (#3201). Fresh
     # installs get this from the ORM model; upgraded installs need the nullable
@@ -1955,7 +1948,24 @@ async def run_migrations(conn):
         conn,
         "ALTER TABLE library_folders ADD COLUMN ownership_reviewed BOOLEAN NOT NULL DEFAULT FALSE",
     )
-    await _migrate_library_folder_owners(conn)
+    return await _migrate_library_folder_owners(conn)
+
+
+async def run_migrations(conn):
+    """Run all schema migrations and data backfills on startup.
+
+    Includes ALTER TABLE (add columns, rename columns, add constraints),
+    CREATE INDEX, CREATE TRIGGER, data UPDATE backfills, and table recreations
+    for complex SQLite schema changes that ALTER TABLE cannot handle.
+
+    DDL statements are wrapped in _safe_execute for idempotency.
+    DML backfills (UPDATE/DELETE) are executed directly via conn.execute()
+    inside begin_nested() so any failure is always fatal and never silently
+    swallowed.
+    """
+    from sqlalchemy import text
+
+    await _migrate_library_ownership_schema(conn)
 
     # Folder sharing/access grants. Existing installs have no shares, so this
     # is purely additive and preserves all ownership data.
@@ -3150,17 +3160,6 @@ async def run_migrations(conn):
         async with conn.begin_nested():
             await conn.execute(
                 text("ALTER TABLE print_queue ADD COLUMN created_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL")
-            )
-    except (OperationalError, ProgrammingError):
-        pass  # Already applied
-
-    # Migration: Add created_by_id column to library_files for user tracking (Issue #206)
-    try:
-        async with conn.begin_nested():
-            await conn.execute(
-                text(
-                    "ALTER TABLE library_files ADD COLUMN created_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL"
-                )
             )
     except (OperationalError, ProgrammingError):
         pass  # Already applied

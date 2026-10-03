@@ -167,3 +167,57 @@ async def test_explicit_unassigned_owner_survives_repeated_backfill(engine):
         assert await _migrate_library_folder_owners(conn) == 0
         assert await _migrate_library_folder_owners(conn) == 0
         assert await _owners(conn) == {1: None}
+
+
+@pytest.mark.asyncio
+async def test_old_schema_adds_file_owner_before_folder_backfill():
+    from backend.app.core.database import _migrate_library_ownership_schema
+
+    eng = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with eng.begin() as conn:
+            await conn.execute(text("CREATE TABLE users (id INTEGER PRIMARY KEY)"))
+            await conn.execute(
+                text(
+                    "CREATE TABLE library_folders (id INTEGER PRIMARY KEY, name TEXT, parent_id INTEGER, is_external BOOLEAN NOT NULL DEFAULT FALSE)"
+                )
+            )
+            await conn.execute(text("CREATE TABLE library_files (id INTEGER PRIMARY KEY, folder_id INTEGER)"))
+            await conn.execute(text("INSERT INTO library_folders (id, name) VALUES (1, 'legacy')"))
+            await conn.execute(text("INSERT INTO library_files (id, folder_id) VALUES (1, 1)"))
+            assert await _migrate_library_ownership_schema(conn) == 0
+            assert (await conn.execute(text("SELECT created_by_id FROM library_files"))).scalar() is None
+            assert await _owners(conn) == {1: None}
+            await conn.execute(text("INSERT INTO users (id) VALUES (42)"))
+            await conn.execute(text("UPDATE library_files SET created_by_id = 42"))
+            assert await _migrate_library_ownership_schema(conn) == 1
+            assert await _owners(conn) == {1: 42}
+            assert await _migrate_library_ownership_schema(conn) == 0
+    finally:
+        await eng.dispose()
+
+
+@pytest.mark.asyncio
+async def test_backfill_handles_1200_level_tree_iteratively(engine):
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("INSERT INTO library_folders (id, name, parent_id) VALUES (:id, :name, :parent)"),
+            [{"id": i, "name": f"folder-{i}", "parent": i - 1 if i > 1 else None} for i in range(1, 1201)],
+        )
+        await _file(conn, 1, 1200, 42)
+        assert await _migrate_library_folder_owners(conn) == 1200
+        assert set((await _owners(conn)).values()) == {42}
+        assert await _migrate_library_folder_owners(conn) == 0
+
+
+@pytest.mark.asyncio
+async def test_cycles_are_skipped_without_blocking_valid_subtrees(engine):
+    async with engine.begin() as conn:
+        await _folder(conn, 1, parent_id=2)
+        await _folder(conn, 2, parent_id=1)
+        await _folder(conn, 3, parent_id=2)
+        await _folder(conn, 4)
+        await _file(conn, 1, 3, 42)
+        await _file(conn, 2, 4, 42)
+        assert await _migrate_library_folder_owners(conn) == 2
+        assert await _owners(conn) == {1: None, 2: None, 3: 42, 4: 42}
