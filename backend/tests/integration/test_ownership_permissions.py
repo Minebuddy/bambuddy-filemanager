@@ -1486,6 +1486,81 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_folder_owner_can_share_without_admin(
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        library_folder_factory,
+    ):
+        folder = await library_folder_factory(
+            name="TeacherOwned",
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+
+        share = await async_client.put(
+            f"/api/v1/library/folders/{folder.id}/shares",
+            json={
+                "principal_type": "user",
+                "principal_id": auth_setup["operator2_user"]["id"],
+                "role": "viewer",
+            },
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert share.status_code == 200
+
+        # library:share is only the global capability. A different operator
+        # still cannot administer somebody else's direct grants.
+        outsider = await async_client.get(
+            f"/api/v1/library/folders/{folder.id}/shares",
+            headers={"Authorization": f"Bearer {auth_setup['operator2_token']}"},
+        )
+        assert outsider.status_code == 403
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_parent_owner_retains_manager_access_to_contributor_child(
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        library_folder_factory,
+    ):
+        parent = await library_folder_factory(
+            name="TeacherParent",
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+
+        share = await async_client.put(
+            f"/api/v1/library/folders/{parent.id}/shares",
+            json={
+                "principal_type": "user",
+                "principal_id": auth_setup["operator2_user"]["id"],
+                "role": "contributor",
+            },
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert share.status_code == 200
+
+        child_response = await async_client.post(
+            "/api/v1/library/folders",
+            json={"name": "StudentChild", "parent_id": parent.id},
+            headers={"Authorization": f"Bearer {auth_setup['operator2_token']}"},
+        )
+        assert child_response.status_code == 200
+        child = child_response.json()
+        assert child["created_by_id"] == auth_setup["operator2_user"]["id"]
+
+        # Ownership of the parent carries manager authority down the subtree,
+        # even though the child row records the contributor as its creator.
+        rename = await async_client.put(
+            f"/api/v1/library/folders/{child['id']}",
+            json={"name": "TeacherReviewedChild"},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert rename.status_code == 200
+        assert rename.json()["name"] == "TeacherReviewedChild"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_shared_folder_viewer_can_read_but_not_manage(
         self,
         async_client: AsyncClient,
