@@ -2,17 +2,14 @@ import { getAuthToken } from './client';
 
 const API_BASE = '/api/v1';
 
-export interface FolderOwner {
-  id: number;
-  created_by_id: number | null;
-}
-
 export interface FolderOwnerUpdate {
   created_by_id: number | null;
   recursive: boolean;
 }
 
-export interface FolderOwnerUpdateResult extends FolderOwner {
+export interface FolderOwnerUpdateResult {
+  id: number;
+  created_by_id: number | null;
   updated_folders: number;
 }
 
@@ -39,9 +36,6 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const libraryOwnershipApi = {
-  getFolderOwner: (folderId: number) =>
-    request<FolderOwner>(`/library/folders/${folderId}/owner`),
-
   updateFolderOwner: (folderId: number, data: FolderOwnerUpdate) =>
     request<FolderOwnerUpdateResult>(`/library/folders/${folderId}/owner`, {
       method: 'PATCH',
