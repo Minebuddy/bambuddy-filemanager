@@ -21,7 +21,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.auth import (
-    RequireAdminIfAuthEnabled,
     require_ownership_permission,
     require_permission_if_auth_enabled,
 )
@@ -29,11 +28,6 @@ from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
 from backend.app.models.library import LibraryFile, LibraryFolder
 from backend.app.models.user import User
-from backend.app.schemas.library import (
-    FolderOwnerResponse,
-    FolderOwnerUpdate,
-    FolderOwnerUpdateResponse,
-)
 from backend.app.schemas.library_trash import (
     EmptyTrashResponse,
     PurgePreviewResponse,
@@ -52,75 +46,6 @@ from backend.app.services.library_trash import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/library", tags=["library-trash"])
-
-
-# ===================== Admin folder ownership repair (#3201) =====================
-
-
-@router.get("/folders/{folder_id}/owner", response_model=FolderOwnerResponse)
-async def get_folder_owner(
-    folder_id: int,
-    db: AsyncSession = Depends(get_db),
-    _admin: User | None = RequireAdminIfAuthEnabled(),
-    _: User | None = Depends(require_permission_if_auth_enabled(Permission.LIBRARY_UPDATE_ALL)),
-):
-    """Return a folder's owner for the admin repair UI."""
-    result = await db.execute(select(LibraryFolder).where(LibraryFolder.id == folder_id))
-    folder = result.scalar_one_or_none()
-    if folder is None:
-        raise HTTPException(status_code=404, detail="Folder not found")
-    if folder.is_external:
-        raise HTTPException(status_code=400, detail="External folders do not have user ownership")
-    return FolderOwnerResponse(id=folder.id, created_by_id=folder.created_by_id)
-
-
-@router.patch("/folders/{folder_id}/owner", response_model=FolderOwnerUpdateResponse)
-async def update_folder_owner(
-    folder_id: int,
-    body: FolderOwnerUpdate,
-    db: AsyncSession = Depends(get_db),
-    _admin: User | None = RequireAdminIfAuthEnabled(),
-    _: User | None = Depends(require_permission_if_auth_enabled(Permission.LIBRARY_UPDATE_ALL)),
-):
-    """Assign or clear folder ownership without changing file ownership.
-
-    With recursive enabled, internal descendant folders receive the same owner.
-    External/system descendants are skipped. Files keep their existing owner.
-    """
-    result = await db.execute(select(LibraryFolder).where(LibraryFolder.id == folder_id))
-    folder = result.scalar_one_or_none()
-    if folder is None:
-        raise HTTPException(status_code=404, detail="Folder not found")
-    if folder.is_external:
-        raise HTTPException(status_code=400, detail="External folders cannot have a user owner")
-
-    if body.created_by_id is not None:
-        owner_result = await db.execute(select(User.id).where(User.id == body.created_by_id))
-        if owner_result.scalar_one_or_none() is None:
-            raise HTTPException(status_code=404, detail="User not found")
-
-    folders_to_update = [folder]
-    if body.recursive:
-        pending_ids = [folder.id]
-        while pending_ids:
-            children_result = await db.execute(
-                select(LibraryFolder).where(LibraryFolder.parent_id.in_(pending_ids))
-            )
-            children = list(children_result.scalars().all())
-            internal_children = [child for child in children if not child.is_external]
-            pending_ids = [child.id for child in internal_children]
-            folders_to_update.extend(internal_children)
-
-    for target in folders_to_update:
-        target.created_by_id = body.created_by_id
-
-    await db.commit()
-
-    return FolderOwnerUpdateResponse(
-        id=folder.id,
-        created_by_id=body.created_by_id,
-        updated_folders=len(folders_to_update),
-    )
 
 
 # ===================== Admin purge =====================
