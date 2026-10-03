@@ -1187,6 +1187,48 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
 
         assert response.status_code == 404
 
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_operator_cannot_move_own_file_into_other_users_folder(
+        self, async_client: AsyncClient, auth_setup, library_folder_factory, library_file_factory
+    ):
+        target = await library_folder_factory(
+            name="OtherDestination",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+        file = await library_file_factory(
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+
+        response = await async_client.post(
+            "/api/v1/library/files/move",
+            json={"file_ids": [file.id], "folder_id": target.id},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_operator_cannot_update_file_destination_to_other_users_folder(
+        self, async_client: AsyncClient, auth_setup, library_folder_factory, library_file_factory
+    ):
+        target = await library_folder_factory(
+            name="OtherDestination",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+        file = await library_file_factory(
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+
+        response = await async_client.put(
+            f"/api/v1/library/files/{file.id}",
+            json={"folder_id": target.id},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 404
+
     # ========================================================================
     # Folder update/delete ownership (#3201)
     # ========================================================================
@@ -1429,18 +1471,27 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_bulk_delete_operator_folders_empty_only(
+    async def test_bulk_delete_operator_folders_respects_ownership(
         self, async_client: AsyncClient, auth_setup, library_folder_factory, library_file_factory
     ):
-        """Bulk delete applies the same rule: empty folders go, non-empty are skipped."""
-        empty_folder = await library_folder_factory(name="BulkEmpty")
-        full_folder = await library_folder_factory(name="BulkFull")
-        await library_file_factory(folder_id=full_folder.id, created_by_id=auth_setup["operator2_user"]["id"])
+        """Bulk delete removes an owned tree but skips a tree containing other users' data."""
+        own_folder = await library_folder_factory(
+            name="BulkOwn",
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+        mixed_folder = await library_folder_factory(
+            name="BulkMixed",
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+        await library_file_factory(
+            folder_id=mixed_folder.id,
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
 
         response = await async_client.post(
             "/api/v1/library/bulk-delete",
             headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
-            json={"file_ids": [], "folder_ids": [empty_folder.id, full_folder.id]},
+            json={"file_ids": [], "folder_ids": [own_folder.id, mixed_folder.id]},
         )
 
         assert response.status_code == 200
