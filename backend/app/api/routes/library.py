@@ -17,7 +17,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from fastapi.responses import FileResponse as FastAPIFileResponse
-from sqlalchemy import distinct, func, select, update
+from sqlalchemy import distinct, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -85,6 +85,12 @@ from backend.app.services.design_settings import (
     overrides_from_config,
 )
 from backend.app.services.filament_requirements import annotate_rack_groups
+from backend.app.services.library_access import (
+    accessible_folder_ids,
+    effective_folder_role,
+    folder_access_roles,
+    role_allows,
+)
 from backend.app.services.pdf_thumbnail import generate_pdf_thumbnail
 from backend.app.services.plate_thumbnail import inject_plate_thumbnails_if_missing
 from backend.app.services.print_confirmation import confirm_outcome_for_new_queue_item
@@ -125,51 +131,83 @@ router = APIRouter(prefix="/library", tags=["library"])
 _PROJECT_SETTINGS_PATH = "Metadata/project_settings.config"
 
 
-def _ensure_library_file_visible(
+async def _ensure_library_file_visible(
+    db: AsyncSession,
     library_file: LibraryFile | None,
     user: User | None,
     can_read_all: bool,
 ) -> LibraryFile:
-    """Per-file visibility gate for ownership-scoped LIBRARY reads (#1726-adjacent).
-
-    Mirrors archives.py::_ensure_archive_visible — single enforcement point so a
-    less-guarded sibling route can't accidentally leak a row. Same shape:
-
-      - Missing / soft-deleted → 404 (not 403, to avoid id-enumeration leaks).
-      - ``can_read_all`` true (LIBRARY_READ_ALL or auth disabled) → file returned.
-      - ``can_read_all`` false and ``created_by_id != user.id`` → 404.
-      - Ownerless files (``created_by_id is None``) require ALL — fail-closed.
-    """
+    """Return a file when ownership or an inherited folder share permits read."""
     if library_file is None or getattr(library_file, "deleted_at", None) is not None:
         raise HTTPException(404, "File not found")
     if can_read_all:
         return library_file
     if user is None:
         raise HTTPException(404, "File not found")
-    if library_file.created_by_id is None or library_file.created_by_id != user.id:
-        raise HTTPException(404, "File not found")
-    return library_file
+    if library_file.created_by_id == user.id:
+        return library_file
+    if library_file.folder_id is not None:
+        role = await effective_folder_role(db, library_file.folder_id, user)
+        if role_allows(role, "viewer"):
+            return library_file
+    raise HTTPException(404, "File not found")
 
 
-def _ensure_library_folder_visible(
+async def _ensure_library_folder_visible(
+    db: AsyncSession,
     folder: LibraryFolder | None,
     user: User | None,
     can_read_all: bool,
 ) -> LibraryFolder:
-    """Per-folder visibility gate for ownership-scoped library reads (#3201).
-
-    Ownerless legacy/system folders require ``library:read_all``. Returning
-    404 rather than 403 for another user's folder matches the existing file
-    visibility gate and avoids turning numeric IDs into an enumeration API.
-    """
+    """Return a folder when ownership or an inherited share permits read."""
     if folder is None:
         raise HTTPException(404, "Folder not found")
     if can_read_all:
         return folder
-    if user is None or folder.created_by_id is None or folder.created_by_id != user.id:
+    if user is None:
         raise HTTPException(404, "Folder not found")
-    return folder
+    role = await effective_folder_role(db, folder.id, user)
+    if role_allows(role, "viewer"):
+        return folder
+    raise HTTPException(404, "Folder not found")
 
+
+async def _require_folder_role(
+    db: AsyncSession,
+    folder: LibraryFolder,
+    user: User | None,
+    can_modify_all: bool,
+    required_role: str,
+) -> None:
+    """Require a contextual folder role in addition to the route permission."""
+    if can_modify_all:
+        return
+    if user is None:
+        raise HTTPException(status_code=403, detail="Folder access denied")
+    role = await effective_folder_role(db, folder.id, user)
+    if not role_allows(role, required_role):
+        raise HTTPException(status_code=403, detail=f"Folder requires {required_role} access")
+
+
+async def _require_file_role(
+    db: AsyncSession,
+    library_file: LibraryFile,
+    user: User | None,
+    can_modify_all: bool,
+    required_role: str,
+) -> None:
+    """Require ownership or a contextual role on the file's parent folder."""
+    if can_modify_all:
+        return
+    if user is None:
+        raise HTTPException(status_code=403, detail="File access denied")
+    if library_file.created_by_id == user.id:
+        return
+    if library_file.folder_id is not None:
+        role = await effective_folder_role(db, library_file.folder_id, user)
+        if role_allows(role, required_role):
+            return
+    raise HTTPException(status_code=403, detail=f"File requires {required_role} access")
 
 def get_library_dir() -> Path:
     """Get the library storage directory."""
@@ -1199,7 +1237,7 @@ async def create_folder(
         if parent is None:
             raise HTTPException(status_code=404, detail="Parent folder not found")
         if current_user is not None and not current_user.has_permission(Permission.LIBRARY_READ_ALL.value):
-            _ensure_library_folder_visible(parent, current_user, False)
+            await _ensure_library_folder_visible(db, parent, current_user, False)
 
     project_name = None
     if data.project_id is not None:
@@ -1272,7 +1310,7 @@ async def get_folder(
         raise HTTPException(status_code=404, detail="Folder not found")
 
     folder, project_name, archive_name = row
-    _ensure_library_folder_visible(folder, user, can_read_all)
+    await _ensure_library_folder_visible(db, folder, user, can_read_all)
 
     agg_query = select(
         func.count(LibraryFile.id),
@@ -1333,7 +1371,7 @@ async def get_folder_readme(
 
     folder_row = await db.execute(select(LibraryFolder).where(LibraryFolder.id == folder_id))
     folder = folder_row.scalar_one_or_none()
-    _ensure_library_folder_visible(folder, user, can_read_all)
+    await _ensure_library_folder_visible(db, folder, user, can_read_all)
 
     query = LibraryFile.active().where(
         LibraryFile.folder_id == folder_id,
@@ -1631,7 +1669,7 @@ async def update_folder(
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
     if not can_modify_all:
-        _ensure_library_folder_visible(folder, user, False)
+        await _ensure_library_folder_visible(db, folder, user, False)
 
     if data.name is not None:
         folder.name = data.name
@@ -1646,7 +1684,7 @@ async def update_folder(
             if destination is None:
                 raise HTTPException(status_code=404, detail="Parent folder not found")
             if not can_modify_all:
-                _ensure_library_folder_visible(destination, user, False)
+                await _ensure_library_folder_visible(db, destination, user, False)
 
             current_id = data.parent_id
             while current_id is not None:
@@ -2622,7 +2660,7 @@ async def upload_file(
             if not target_folder:
                 raise HTTPException(status_code=404, detail="Folder not found")
             if current_user is not None and not current_user.has_permission(Permission.LIBRARY_READ_ALL.value):
-                _ensure_library_folder_visible(target_folder, current_user, False)
+                await _ensure_library_folder_visible(db, target_folder, current_user, False)
 
         # Writable external folders write through to the mount so the file is
         # visible outside Bambuddy (#1112); everything else lands under the
@@ -2798,7 +2836,7 @@ async def extract_zip_file(
         if not target_folder:
             raise HTTPException(status_code=404, detail="Target folder not found")
         if current_user is not None and not current_user.has_permission(Permission.LIBRARY_READ_ALL.value):
-            _ensure_library_folder_visible(target_folder, current_user, False)
+            await _ensure_library_folder_visible(db, target_folder, current_user, False)
         if target_folder.is_external and target_folder.external_readonly:
             raise HTTPException(status_code=403, detail="Cannot extract ZIP to a read-only external folder")
         if target_folder.is_external:
@@ -3275,7 +3313,10 @@ async def combine_files(
 
     # Gate every source before touching any of them on disk, so the answer for
     # a file the caller can't see is the same 404 whatever else is in the list.
-    sources = [_ensure_library_file_visible(by_id.get(file_id), current_user, can_read_all) for file_id in copies_by_id]
+    sources = [
+        await _ensure_library_file_visible(db, by_id.get(file_id), current_user, can_read_all)
+        for file_id in copies_by_id
+    ]
 
     parts: list[CombinePart] = []
     for lib_file in sources:
@@ -3554,7 +3595,7 @@ async def get_library_file_plates(
     user, can_read_all = auth_result
     # Get the library file
     result = await db.execute(LibraryFile.active().where(LibraryFile.id == file_id))
-    lib_file = _ensure_library_file_visible(result.scalar_one_or_none(), user, can_read_all)
+    lib_file = await _ensure_library_file_visible(db, result.scalar_one_or_none(), user, can_read_all)
 
     if not lib_file:
         raise HTTPException(status_code=404, detail="File not found")
@@ -3841,7 +3882,7 @@ async def get_library_file_plate_thumbnail(
 
     user, can_read_all = auth_result
     result = await db.execute(LibraryFile.active().where(LibraryFile.id == file_id))
-    lib_file = _ensure_library_file_visible(result.scalar_one_or_none(), user, can_read_all)
+    lib_file = await _ensure_library_file_visible(db, result.scalar_one_or_none(), user, can_read_all)
 
     file_path = Path(app_settings.base_dir) / lib_file.file_path
     if not file_path.exists():
@@ -3939,7 +3980,7 @@ async def get_library_file_filament_requirements(
     user, can_read_all = auth_result
     # Get the library file
     result = await db.execute(LibraryFile.active().where(LibraryFile.id == file_id))
-    lib_file = _ensure_library_file_visible(result.scalar_one_or_none(), user, can_read_all)
+    lib_file = await _ensure_library_file_visible(db, result.scalar_one_or_none(), user, can_read_all)
 
     # Get the full file path
     file_path = Path(app_settings.base_dir) / lib_file.file_path
@@ -5348,7 +5389,7 @@ async def slice_library_file(
     # use before reading the source off disk. API-key / auth-disabled callers
     # (current_user is None) keep can_read_all=True — no per-row identity.
     can_read_all = current_user is None or current_user.has_permission(Permission.LIBRARY_READ_ALL.value)
-    lib_file = _ensure_library_file_visible(lib_file, current_user, can_read_all)
+    lib_file = await _ensure_library_file_visible(db, lib_file, current_user, can_read_all)
 
     src_lower = (lib_file.filename or "").lower()
     if src_lower.endswith(".step") or src_lower.endswith(".stp"):
@@ -5482,7 +5523,7 @@ async def get_file(
     result = await db.execute(
         LibraryFile.active().options(selectinload(LibraryFile.created_by)).where(LibraryFile.id == file_id)
     )
-    file = _ensure_library_file_visible(result.scalar_one_or_none(), user, can_read_all)
+    file = await _ensure_library_file_visible(db, result.scalar_one_or_none(), user, can_read_all)
 
     # Get folder name
     folder_name = None
@@ -5612,7 +5653,7 @@ async def update_file(
             if destination is None:
                 raise HTTPException(status_code=404, detail="Folder not found")
             if not can_modify_all:
-                _ensure_library_folder_visible(destination, user, False)
+                await _ensure_library_folder_visible(db, destination, user, False)
             file.folder_id = data.folder_id
 
     if data.project_id is not None:
@@ -5713,7 +5754,7 @@ async def download_file(
     """Download a file."""
     user, can_read_all = auth_result
     result = await db.execute(LibraryFile.active().where(LibraryFile.id == file_id))
-    file = _ensure_library_file_visible(result.scalar_one_or_none(), user, can_read_all)
+    file = await _ensure_library_file_visible(db, result.scalar_one_or_none(), user, can_read_all)
 
     abs_path = to_absolute_path(file.file_path)
     if not abs_path or not abs_path.exists():
@@ -5746,7 +5787,7 @@ async def create_library_slicer_token(
 
     user, can_read_all = auth_result
     result = await db.execute(LibraryFile.active().where(LibraryFile.id == file_id))
-    _ensure_library_file_visible(result.scalar_one_or_none(), user, can_read_all)
+    await _ensure_library_file_visible(db, result.scalar_one_or_none(), user, can_read_all)
 
     token = await create_slicer_download_token("library", file_id)
     return {"token": token}
@@ -5808,7 +5849,7 @@ async def get_thumbnail(
     """
     user, can_read_all = auth_result
     result = await db.execute(LibraryFile.active().where(LibraryFile.id == file_id))
-    file = _ensure_library_file_visible(result.scalar_one_or_none(), user, can_read_all)
+    file = await _ensure_library_file_visible(db, result.scalar_one_or_none(), user, can_read_all)
 
     abs_thumb_path = to_absolute_path(file.thumbnail_path)
     if not abs_thumb_path or not abs_thumb_path.exists():
@@ -6000,7 +6041,7 @@ async def get_file_photo(
     """Serve one photo. Media-token auth like the thumbnail route (#3025)."""
     user, can_read_all = auth_result
     result = await db.execute(LibraryFile.active().where(LibraryFile.id == file_id))
-    library_file = _ensure_library_file_visible(result.scalar_one_or_none(), user, can_read_all)
+    library_file = await _ensure_library_file_visible(db, result.scalar_one_or_none(), user, can_read_all)
 
     # Membership check first: names are uuid-generated on upload, so anything
     # not in the stored list is not a photo, whatever is on disk.
@@ -6087,7 +6128,7 @@ async def get_gcode(
     """
     user, can_read_all = auth_result
     result = await db.execute(LibraryFile.active().where(LibraryFile.id == file_id))
-    file = _ensure_library_file_visible(result.scalar_one_or_none(), user, can_read_all)
+    file = await _ensure_library_file_visible(db, result.scalar_one_or_none(), user, can_read_all)
 
     abs_path = to_absolute_path(file.file_path)
     if not abs_path or not abs_path.exists():
@@ -6161,7 +6202,7 @@ async def move_files(
         if not target_folder:
             raise HTTPException(status_code=404, detail="Folder not found")
         if not can_modify_all:
-            _ensure_library_folder_visible(target_folder, user, False)
+            await _ensure_library_folder_visible(db, target_folder, user, False)
         if target_folder.is_external and target_folder.external_readonly:
             raise HTTPException(status_code=403, detail="Cannot move files to a read-only external folder")
 
