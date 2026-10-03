@@ -1392,6 +1392,49 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
         )
         assert response.status_code == 404
 
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_admin_cannot_assign_owner_to_external_folder(
+        self, async_client: AsyncClient, auth_setup, library_folder_factory
+    ):
+        folder = await library_folder_factory(
+            name="ExternalMount",
+            is_external=True,
+            external_path="/mnt/models",
+        )
+
+        response = await async_client.patch(
+            f"/api/v1/library/folders/{folder.id}/owner",
+            json={"created_by_id": auth_setup["operator_user"]["id"]},
+            headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "External folders cannot be assigned to a user"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_admin_owner_change_requires_explicit_owner_field(
+        self, async_client: AsyncClient, auth_setup, library_folder_factory, db_session
+    ):
+        folder = await library_folder_factory(
+            name="ExplicitOwnerRequired",
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+
+        response = await async_client.patch(
+            f"/api/v1/library/folders/{folder.id}/owner",
+            json={},
+            headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+        )
+
+        assert response.status_code == 422
+        db_session.expire_all()
+        stored = (
+            await db_session.execute(select(LibraryFolder).where(LibraryFolder.id == folder.id))
+        ).scalar_one()
+        assert stored.created_by_id == auth_setup["operator_user"]["id"]
+
     # ========================================================================
     # Folder update/delete ownership (#3201)
     # ========================================================================
