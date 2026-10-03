@@ -30,7 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.routes.cloud import resolve_api_key_cloud_owner
-from backend.app.api.routes.library import save_3mf_bytes_to_library
+from backend.app.api.routes.library import _ensure_library_folder_visible, save_3mf_bytes_to_library
 from backend.app.core.auth import (
     RequirePermissionIfAuthEnabled,
     require_auth_if_enabled,
@@ -327,12 +327,15 @@ async def import_instance(
     # which the UI lists anyway; anonymous callers never get this far.
     provider = _provider_for_source(body.source_type)
     current_user = await _authorize_for_provider(provider, provider.import_permission, credentials, x_api_key)
+    resource_user = current_user or api_key_cloud_owner
 
     if body.folder_id is not None:
         folder_q = await db.execute(select(LibraryFolder).where(LibraryFolder.id == body.folder_id))
         target_folder = folder_q.scalar_one_or_none()
         if target_folder is None:
             raise HTTPException(status_code=404, detail="Folder not found")
+        if resource_user is not None and not resource_user.has_permission(Permission.LIBRARY_READ_ALL.value):
+            _ensure_library_folder_visible(target_folder, resource_user, False)
         if target_folder.is_external and target_folder.external_readonly:
             raise HTTPException(
                 status_code=403,
@@ -352,16 +355,25 @@ async def import_instance(
         if default_folder_name is None:
             effective_folder_id = None
         else:
-            default_folder_q = await db.execute(
-                select(LibraryFolder).where(
-                    LibraryFolder.name == default_folder_name,
-                    LibraryFolder.parent_id.is_(None),
-                    LibraryFolder.is_external.is_(False),
-                )
+            default_folder_query = select(LibraryFolder).where(
+                LibraryFolder.name == default_folder_name,
+                LibraryFolder.parent_id.is_(None),
+                LibraryFolder.is_external.is_(False),
             )
+            if resource_user is not None:
+                default_folder_query = default_folder_query.where(
+                    LibraryFolder.created_by_id == resource_user.id
+                )
+            else:
+                default_folder_query = default_folder_query.where(LibraryFolder.created_by_id.is_(None))
+            default_folder_q = await db.execute(default_folder_query)
             default_folder = default_folder_q.scalar_one_or_none()
             if default_folder is None:
-                default_folder = LibraryFolder(name=default_folder_name, parent_id=None)
+                default_folder = LibraryFolder(
+                    name=default_folder_name,
+                    parent_id=None,
+                    created_by_id=resource_user.id if resource_user else None,
+                )
                 db.add(default_folder)
                 await db.flush()
             effective_folder_id = default_folder.id
@@ -390,7 +402,10 @@ async def import_instance(
         source_url = provider.canonical_url(info.ref)
 
         # Dedupe check upfront so we don't burn bandwidth re-downloading.
-        existing_q = await db.execute(LibraryFile.active().where(LibraryFile.source_url == source_url).limit(1))
+        existing_query = LibraryFile.active().where(LibraryFile.source_url == source_url)
+        if resource_user is not None and not resource_user.has_permission(Permission.LIBRARY_READ_ALL.value):
+            existing_query = existing_query.where(LibraryFile.created_by_id == resource_user.id)
+        existing_q = await db.execute(existing_query.limit(1))
         existing_row = existing_q.scalar_one_or_none()
         if existing_row is not None:
             return MakerWorldImportResponse(
@@ -432,7 +447,7 @@ async def import_instance(
     # this collapse stays route-side solely so the library row is attributed
     # to the key's owner rather than NULL. Credential identity is resolved
     # inside the provider.
-    cloud_token_user = current_user or api_key_cloud_owner
+    cloud_token_user = resource_user
     library_file, was_existing = await save_3mf_bytes_to_library(
         db,
         file_bytes=download.file_bytes,
