@@ -14,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
     func,
     select,
 )
@@ -40,6 +41,9 @@ class LibraryFolder(Base):
     created_by_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
+
+    # Explicit admin ownership decisions must survive the legacy backfill on restart.
+    ownership_reviewed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     # External folder flags (for folders that point to external paths)
     is_external: Mapped[bool] = mapped_column(Boolean, default=False)

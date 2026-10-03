@@ -54,6 +54,8 @@ export function FolderOwnerModal({ folder, onClose }: FolderOwnerModalProps) {
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['library-folders'] });
       queryClient.invalidateQueries({ queryKey: ['library-files'] });
+      queryClient.invalidateQueries({ queryKey: ['library-folder-access-overview'] });
+      queryClient.invalidateQueries({ queryKey: ['library-stats'] });
       showToast(
         result.updated_folders === 1
           ? t('fileManager.folderOwner.savedOne', {
@@ -118,7 +120,7 @@ export function FolderOwnerModal({ folder, onClose }: FolderOwnerModalProps) {
             >
               <option value={UNASSIGNED_OWNER}>
                 {t('fileManager.folderOwner.unassigned', {
-                  defaultValue: 'Unassigned / admin-only',
+                  defaultValue: 'Unassigned',
                 })}
               </option>
               {filteredUsers.map((user) => (
@@ -149,7 +151,7 @@ export function FolderOwnerModal({ folder, onClose }: FolderOwnerModalProps) {
             <span>
               {t('fileManager.folderOwner.warning', {
                 defaultValue:
-                  'This changes folder ownership only. Files keep their existing owners, and external folders are not reassigned.',
+                  'This changes folder ownership only. Files keep their existing owners, and external folders are not reassigned. Clearing ownership does not remove direct or inherited sharing; review access separately.',
               })}
             </span>
           </div>

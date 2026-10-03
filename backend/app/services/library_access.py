@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from fastapi import HTTPException
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +17,61 @@ ROLE_RANK: dict[str, int] = {
     "contributor": 2,
     "manager": 3,
 }
+
+
+async def folder_access_grants(db: AsyncSession, folder_id: int | None) -> dict[tuple[str, int], str]:
+    """Describe inherited grants without expanding groups into current members.
+
+    Move checks compare these grants so future membership changes cannot turn
+    an apparently safe move into a new disclosure. Owners are manager grants.
+    """
+    grants: dict[tuple[str, int], str] = {}
+    visited: set[int] = set()
+    while folder_id is not None:
+        if folder_id in visited:
+            raise HTTPException(409, "Cannot move content through a cyclic folder tree")
+        visited.add(folder_id)
+        folder = await db.get(LibraryFolder, folder_id)
+        if folder is None:
+            raise HTTPException(404, "Folder not found")
+        if folder.created_by_id is not None:
+            grants[("user", folder.created_by_id)] = "manager"
+        shares = (
+            await db.execute(select(LibraryFolderShare).where(LibraryFolderShare.folder_id == folder_id))
+        ).scalars()
+        for share in shares:
+            principal = ("user", share.user_id) if share.user_id is not None else ("group", share.group_id)
+            grants[principal] = stronger_role(grants.get(principal), share.role) or share.role
+        if folder.is_external:
+            break
+        folder_id = folder.parent_id
+    return grants
+
+
+async def require_preserved_folder_access(
+    db: AsyncSession,
+    source_id: int | None,
+    destination_id: int | None,
+) -> None:
+    """Managers may reorganize others' content only within the same access context."""
+    if source_id == destination_id:
+        return
+    if await folder_access_grants(db, source_id) != await folder_access_grants(db, destination_id):
+        raise HTTPException(403, "Moving another user's content cannot change inherited access; ask an administrator")
+
+
+async def folder_tree_ids(db: AsyncSession, folder_id: int) -> set[int]:
+    """Collect a subtree, rejecting malformed cycles before changing content."""
+    visited: set[int] = set()
+    pending = [folder_id]
+    while pending:
+        current = pending.pop()
+        if current in visited:
+            raise HTTPException(409, "Cyclic folder tree")
+        visited.add(current)
+        rows = await db.execute(select(LibraryFolder.id).where(LibraryFolder.parent_id == current))
+        pending.extend(rows.scalars().all())
+    return visited
 
 
 def stronger_role(*roles: str | None) -> str | None:
@@ -53,6 +109,7 @@ async def folder_access_roles(db: AsyncSession, user: User) -> dict[int, str]:
                 LibraryFolder.id,
                 LibraryFolder.parent_id,
                 LibraryFolder.created_by_id,
+                LibraryFolder.is_external,
             )
         )
     ).all()
@@ -81,38 +138,36 @@ async def folder_access_roles(db: AsyncSession, user: User) -> dict[int, str]:
 
     parents: dict[int, int | None] = {}
     owners: dict[int, int | None] = {}
-    for folder_id, parent_id, owner_id in folder_rows:
+    external_ids: set[int] = set()
+    for folder_id, parent_id, owner_id, is_external in folder_rows:
+        if is_external:
+            external_ids.add(int(folder_id))
         fid = int(folder_id)
         parents[fid] = int(parent_id) if parent_id is not None else None
         owners[fid] = int(owner_id) if owner_id is not None else None
 
     inherited_cache: dict[int, str | None] = {}
 
-    def inherited_share_role(folder_id: int, visiting: set[int]) -> str | None:
-        if folder_id in inherited_cache:
-            return inherited_cache[folder_id]
-        if folder_id in visiting:
-            inherited_cache[folder_id] = None
-            return None
-
-        visiting.add(folder_id)
-        parent_id = parents.get(folder_id)
-        parent_role = (
-            inherited_share_role(parent_id, visiting) if parent_id is not None and parent_id in parents else None
-        )
-        owner_role = "manager" if owners.get(folder_id) == user.id else None
-        result = stronger_role(
-            parent_role,
-            direct_share_roles.get(folder_id),
-            owner_role,
-        )
-        visiting.remove(folder_id)
-        inherited_cache[folder_id] = result
-        return result
-
     effective: dict[int, str] = {}
     for folder_id in parents:
-        role = inherited_share_role(folder_id, set())
+        path: list[int] = []
+        visiting: set[int] = set()
+        current: int | None = folder_id
+        while current is not None and current in parents and current not in inherited_cache:
+            if current in visiting:
+                raise HTTPException(409, "Cyclic folder tree")
+            visiting.add(current)
+            path.append(current)
+            current = None if current in external_ids else parents[current]
+        role = inherited_cache.get(current) if current is not None else None
+        for child_id in reversed(path):
+            role = stronger_role(
+                role,
+                direct_share_roles.get(child_id),
+                "manager" if owners.get(child_id) == user.id else None,
+            )
+            inherited_cache[child_id] = role
+        role = inherited_cache.get(folder_id)
         if role is not None:
             effective[folder_id] = role
 

@@ -531,6 +531,7 @@ function RenameModal({ type, currentName, onClose, onSave, isLoading, t }: Renam
 // Move Files Modal
 interface MoveFilesModalProps {
   folders: LibraryFolderTree[];
+  canUseAllFolders: boolean;
   selectedFiles: number[];
   currentFolderId: number | null;
   onClose: () => void;
@@ -539,13 +540,16 @@ interface MoveFilesModalProps {
   t: TFunction;
 }
 
-function MoveFilesModal({ folders, selectedFiles, currentFolderId, onClose, onMove, isLoading, t }: MoveFilesModalProps) {
+function MoveFilesModal({ folders, canUseAllFolders, selectedFiles, currentFolderId, onClose, onMove, isLoading, t }: MoveFilesModalProps) {
   const [targetFolder, setTargetFolder] = useState<number | null>(null);
 
   const flattenFolders = (items: LibraryFolderTree[], depth = 0): { id: number | null; name: string; depth: number }[] => {
     const result: { id: number | null; name: string; depth: number }[] = [];
     for (const item of items) {
-      result.push({ id: item.id, name: item.name, depth });
+      if ((canUseAllFolders || item.access_role === 'contributor' || item.access_role === 'manager') &&
+          !(item.is_external && item.external_readonly)) {
+        result.push({ id: item.id, name: item.name, depth });
+      }
       if (item.children.length > 0) {
         result.push(...flattenFolders(item.children, depth + 1));
       }
@@ -825,21 +829,16 @@ function FolderActionsMenu({ folder, onDelete, onLink, onRename, onManageOwner, 
   const isLinked = folder.project_id || folder.archive_id;
   const isExternal = folder.is_external;
   const hasManagerAccess = isAdmin || folder.access_role === 'manager';
-  const ownsFolder = currentUserId !== null && folder.created_by_id === currentUserId;
   const hasDeleteAll = hasPermission('library:delete_all');
-  const canDeleteOwnFolder =
+  const canDeleteManagedFolder =
     hasPermission('library:delete_own') &&
-    ownsFolder &&
     hasManagerAccess &&
     !isExternal &&
     !isLinked;
-  const isEmptyFolder = folder.file_count === 0 && folder.children.length === 0;
-  const canDeleteFolder = hasDeleteAll || (canDeleteOwnFolder && isEmptyFolder);
+  const canDeleteFolder = hasDeleteAll || canDeleteManagedFolder;
   const deleteDisabledTooltip = canDeleteFolder
     ? undefined
-    : canDeleteOwnFolder && !isEmptyFolder
-      ? t('fileManager.onlyEmptyFoldersDeletable')
-      : t('fileManager.noPermissionDeleteFolder');
+    : t('fileManager.noPermissionDeleteFolder');
   const canRename =
     hasPermission('library:update_all') ||
     (hasPermission('library:update_own') && hasManagerAccess);
@@ -2110,12 +2109,23 @@ export function FileManagerPage() {
   const moveFilesMutation = useMutation({
     mutationFn: ({ fileIds, folderId }: { fileIds: number[]; folderId: number | null }) =>
       api.moveLibraryFiles(fileIds, folderId),
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['library-files'] });
       queryClient.invalidateQueries({ queryKey: ['library-folders'] });
       setSelectedFiles([]);
       setShowMoveModal(false);
-      showToast(t('fileManager.toast.filesMoved'), 'success');
+      if (result.skipped > 0) {
+        showToast(
+          t('fileManager.toast.moveSkipped', {
+            defaultValue: '{{moved}} files moved; {{skipped}} skipped. Check your access to the source and destination.',
+            moved: result.moved,
+            skipped: result.skipped,
+          }),
+          'error',
+        );
+      } else {
+        showToast(t('fileManager.toast.filesMoved'), 'success');
+      }
     },
     onError: (error: Error) => showToast(error.message, 'error'),
   });
@@ -2273,6 +2283,7 @@ export function FileManagerPage() {
   const canContributeToSelectedFolder =
     selectedFolderId === null ||
     isAdmin ||
+    hasPermission('library:update_all') ||
     selectedFolder?.access_role === 'contributor' ||
     selectedFolder?.access_role === 'manager';
   const canUpload =
@@ -3937,6 +3948,7 @@ export function FileManagerPage() {
       {showMoveModal && folders && (
         <MoveFilesModal
           folders={folders}
+          canUseAllFolders={!authEnabled || hasPermission('library:update_all')}
           selectedFiles={selectedFiles}
           currentFolderId={selectedFolderId}
           onClose={() => setShowMoveModal(false)}

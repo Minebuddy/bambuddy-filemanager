@@ -91,6 +91,8 @@ from backend.app.services.library_access import (
     accessible_folder_ids,
     effective_folder_role,
     folder_access_roles,
+    folder_tree_ids,
+    require_preserved_folder_access,
     role_allows,
 )
 from backend.app.services.pdf_thumbnail import generate_pdf_thumbnail
@@ -211,6 +213,54 @@ async def _require_file_role(
         if role_allows(role, required_role):
             return
     raise HTTPException(status_code=403, detail=f"File requires {required_role} access")
+
+
+async def _file_visibility_filter(db: AsyncSession, user: User | None, can_read_all: bool):
+    if user is None or can_read_all:
+        return None
+    ids = await accessible_folder_ids(db, user, "viewer")
+    return or_(LibraryFile.created_by_id == user.id, LibraryFile.folder_id.in_(ids))
+
+
+async def _require_safe_file_move(
+    db: AsyncSession,
+    file: LibraryFile,
+    destination_id: int | None,
+    user: User | None,
+    can_modify_all: bool,
+) -> None:
+    if not can_modify_all and user is not None and file.created_by_id != user.id:
+        await require_preserved_folder_access(db, file.folder_id, destination_id)
+
+
+async def _require_safe_folder_move(
+    db: AsyncSession,
+    folder: LibraryFolder,
+    destination_id: int | None,
+    user: User | None,
+    can_modify_all: bool,
+) -> None:
+    if can_modify_all or user is None or folder.parent_id == destination_id:
+        return
+    ids = await folder_tree_ids(db, folder.id)
+    foreign_folder = await db.scalar(
+        select(LibraryFolder.id)
+        .where(
+            LibraryFolder.id.in_(ids),
+            or_(LibraryFolder.created_by_id.is_(None), LibraryFolder.created_by_id != user.id),
+        )
+        .limit(1)
+    )
+    foreign_file = await db.scalar(
+        select(LibraryFile.id)
+        .where(
+            LibraryFile.folder_id.in_(ids),
+            or_(LibraryFile.created_by_id.is_(None), LibraryFile.created_by_id != user.id),
+        )
+        .limit(1)
+    )
+    if foreign_folder is not None or foreign_file is not None:
+        await require_preserved_folder_access(db, folder.parent_id, destination_id)
 
 
 def get_library_dir() -> Path:
@@ -698,7 +748,14 @@ async def save_3mf_bytes_to_library(
     """
     # Source-URL-based dedupe: return the existing row untouched.
     if source_url:
-        existing = await db.execute(LibraryFile.active().where(LibraryFile.source_url == source_url).limit(1))
+        existing = await db.execute(
+            LibraryFile.active()
+            .where(
+                LibraryFile.source_url == source_url,
+                LibraryFile.created_by_id == owner_id,
+            )
+            .limit(1)
+        )
         existing_row = existing.scalar_one_or_none()
         if existing_row is not None:
             return existing_row, True
@@ -1011,9 +1068,8 @@ async def list_folders(
         .outerjoin(PrintArchive, LibraryFolder.archive_id == PrintArchive.id)
     )
     visible_folder_ids: set[int] | None = None
-    folder_roles: dict[int, str] = {}
+    folder_roles = await folder_access_roles(db, user) if user is not None else {}
     if user is not None and not can_read_all:
-        folder_roles = await folder_access_roles(db, user)
         visible_folder_ids = set(folder_roles)
         if not visible_folder_ids:
             return []
@@ -1022,8 +1078,7 @@ async def list_folders(
     result = await db.execute(folder_query.order_by(LibraryFolder.name))
     rows = result.all()
 
-    # File counts and activity must not reveal metadata for another user's
-    # files merely because the caller can see or manage their containing folder.
+    # Counts and activity use the same folder-sharing visibility as file listings.
     file_counts_query = (
         select(LibraryFile.folder_id, func.count(LibraryFile.id))
         .where(LibraryFile.folder_id.isnot(None), LibraryFile.deleted_at.is_(None))
@@ -1031,9 +1086,6 @@ async def list_folders(
     )
     if visible_folder_ids is not None:
         file_counts_query = file_counts_query.where(LibraryFile.folder_id.in_(visible_folder_ids))
-        # The folder count must not disclose files that the caller cannot
-        # manage under library:delete_own, even when they own the folder.
-        file_counts_query = file_counts_query.where(LibraryFile.created_by_id == user.id)
     file_counts_result = await db.execute(file_counts_query)
     file_counts = dict(file_counts_result.all())
 
@@ -1047,7 +1099,6 @@ async def list_folders(
     )
     if visible_folder_ids is not None:
         latest_file_activity_query = latest_file_activity_query.where(LibraryFile.folder_id.in_(visible_folder_ids))
-        latest_file_activity_query = latest_file_activity_query.where(LibraryFile.created_by_id == user.id)
     latest_file_activity_result = await db.execute(latest_file_activity_query)
     latest_file_activity = dict(latest_file_activity_result.all())
 
@@ -1072,7 +1123,7 @@ async def list_folders(
             external_path=folder.external_path,
             external_readonly=folder.external_readonly,
             file_count=file_counts.get(folder.id, 0),
-            access_role="manager" if can_read_all else folder_roles.get(folder.id),
+            access_role="manager" if user is None or user.is_admin else folder_roles.get(folder.id),
             latest_activity_at=own_activity,
             children=[],
         )
@@ -1707,7 +1758,8 @@ async def upsert_folder_share(
 ):
     """Create or update one direct user/group grant."""
 
-    await _load_share_managed_folder(db, folder_id, current_user)
+    folder = await _load_share_managed_folder(db, folder_id, current_user)
+    folder.ownership_reviewed = True
 
     if data.principal_type == "user":
         principal_result = await db.execute(select(User).where(User.id == data.principal_id, User.is_active.is_(True)))
@@ -1812,7 +1864,12 @@ async def update_folder_owner(
                     queue.append(child_id)
 
     await db.execute(
-        update(LibraryFolder).where(LibraryFolder.id.in_(target_ids)).values(created_by_id=data.created_by_id)
+        update(LibraryFolder)
+        .where(LibraryFolder.id.in_(target_ids))
+        .values(
+            created_by_id=data.created_by_id,
+            ownership_reviewed=True,
+        )
     )
     await db.commit()
 
@@ -1843,6 +1900,8 @@ async def update_folder(
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
     await _require_folder_role(db, folder, user, can_modify_all, "manager")
+    if data.parent_id is not None:
+        await _require_safe_folder_move(db, folder, data.parent_id or None, user, can_modify_all)
 
     if data.name is not None:
         folder.name = data.name
@@ -1952,14 +2011,12 @@ async def _restricted_owned_folder_delete_blocker(
     roles = await folder_access_roles(db, user)
     if not role_allows(roles.get(folder.id), "manager"):
         return "Manager access is required to delete this folder"
-    if folder.created_by_id != user.id:
-        return "You can only delete your own folders"
     if folder.is_external:
         return "External folders can only be deleted by users with library:delete_all"
     if folder.project_id is not None or folder.archive_id is not None:
         return "Folders linked to a project or archive can only be deleted by users with library:delete_all"
 
-    tree_folder_ids = [folder.id]
+    visited = {folder.id}
     queue = [folder.id]
     while queue:
         parent_id = queue.pop()
@@ -1969,32 +2026,17 @@ async def _restricted_owned_folder_delete_blocker(
                 LibraryFolder.is_external,
                 LibraryFolder.project_id,
                 LibraryFolder.archive_id,
-                LibraryFolder.created_by_id,
             ).where(LibraryFolder.parent_id == parent_id)
         )
-        for child_id, is_external, project_id, archive_id, created_by_id in children_result.all():
+        for child_id, is_external, project_id, archive_id in children_result.all():
             if not role_allows(roles.get(child_id), "manager"):
                 return "Folder tree contains a subfolder without manager access"
-            if created_by_id != user.id:
-                return "Folder tree contains a subfolder owned by another user"
             if is_external or project_id is not None or archive_id is not None:
                 return "Folder tree contains a protected external or linked subfolder"
-            tree_folder_ids.append(child_id)
+            if child_id in visited:
+                return "Cyclic folder tree"
+            visited.add(child_id)
             queue.append(child_id)
-
-    foreign_file = await db.execute(
-        select(LibraryFile.id)
-        .where(
-            LibraryFile.folder_id.in_(tree_folder_ids),
-            or_(
-                LibraryFile.created_by_id.is_(None),
-                LibraryFile.created_by_id != user.id,
-            ),
-        )
-        .limit(1)
-    )
-    if foreign_file.scalar_one_or_none() is not None:
-        return "Folder tree contains files owned by another user"
 
     return None
 
@@ -2699,9 +2741,8 @@ async def list_files(
         selectinload(LibraryFile.tags),
     )
     visible_folder_ids: set[int] | None = None
-    file_folder_roles: dict[int, str] = {}
+    file_folder_roles = await folder_access_roles(db, user) if user is not None else {}
     if user is not None and not can_read_all:
-        file_folder_roles = await folder_access_roles(db, user)
         visible_folder_ids = set(file_folder_roles)
         visibility_conditions = [LibraryFile.created_by_id == user.id]
         if visible_folder_ids:
@@ -2762,11 +2803,14 @@ async def list_files(
     if files:
         hashes = [f.file_hash for f in files if f.file_hash]
         if hashes:
-            dup_result = await db.execute(
-                select(LibraryFile.file_hash, func.count(LibraryFile.id))
-                .where(LibraryFile.file_hash.in_(hashes), LibraryFile.deleted_at.is_(None))
-                .group_by(LibraryFile.file_hash)
+            duplicate_query = select(LibraryFile.file_hash, func.count(LibraryFile.id)).where(
+                LibraryFile.file_hash.in_(hashes),
+                LibraryFile.deleted_at.is_(None),
             )
+            visibility = await _file_visibility_filter(db, user, can_read_all)
+            if visibility is not None:
+                duplicate_query = duplicate_query.where(visibility)
+            dup_result = await db.execute(duplicate_query.group_by(LibraryFile.file_hash))
             hash_counts = {h: c - 1 for h, c in dup_result.all()}  # -1 to exclude self
 
     # Variant group sizes (#671 / #2570). Counted across the whole group rather
@@ -2812,7 +2856,7 @@ async def list_files(
                 duplicate_count=hash_counts.get(f.file_hash, 0) if f.file_hash else 0,
                 access_role=(
                     "manager"
-                    if can_read_all or (user is not None and f.created_by_id == user.id)
+                    if user is None or user.is_admin or f.created_by_id == user.id
                     else file_folder_roles.get(f.folder_id)
                     if f.folder_id is not None
                     else None
@@ -2906,9 +2950,18 @@ async def upload_file(
         file_hash = calculate_file_hash(file_path)
 
         # Check for duplicates
-        dup_result = await db.execute(
-            select(LibraryFile.id).where(LibraryFile.file_hash == file_hash, LibraryFile.deleted_at.is_(None)).limit(1)
+        duplicate_query = select(LibraryFile.id).where(
+            LibraryFile.file_hash == file_hash,
+            LibraryFile.deleted_at.is_(None),
         )
+        visibility = await _file_visibility_filter(
+            db,
+            current_user,
+            current_user is None or current_user.has_permission(Permission.LIBRARY_READ_ALL.value),
+        )
+        if visibility is not None:
+            duplicate_query = duplicate_query.where(visibility)
+        dup_result = await db.execute(duplicate_query.limit(1))
         duplicate_of = dup_result.scalar()
 
         # Extract metadata and thumbnail
@@ -5306,6 +5359,19 @@ async def slice_and_persist(
     if folder_id is not None:
         folder_result = await db.execute(select(LibraryFolder).where(LibraryFolder.id == folder_id))
         target_folder = folder_result.scalar_one_or_none()
+        if target_folder is None:
+            raise HTTPException(404, "Slice destination folder no longer exists")
+        if current_user_id is not None:
+            resource_user = await db.get(User, current_user_id)
+            if resource_user is None:
+                raise HTTPException(403, "Slice owner no longer exists")
+            await _require_folder_role(
+                db,
+                target_folder,
+                resource_user,
+                resource_user.has_permission(Permission.LIBRARY_UPDATE_ALL.value),
+                "contributor",
+            )
     out_path, out_is_external, external_fallback = _resolve_slice_destination(target_folder, out_filename)
     if out_is_external:
         # _unique_external_name may have suffixed it; the library row has to
@@ -5637,6 +5703,15 @@ async def slice_library_file(
     # (current_user is None) keep can_read_all=True — no per-row identity.
     can_read_all = current_user is None or current_user.has_permission(Permission.LIBRARY_READ_ALL.value)
     lib_file = await _ensure_library_file_visible(db, lib_file, current_user, can_read_all)
+    if lib_file.folder_id is not None and current_user is not None:
+        destination = await db.get(LibraryFolder, lib_file.folder_id)
+        await _require_folder_role(
+            db,
+            destination,
+            current_user,
+            current_user.has_permission(Permission.LIBRARY_UPDATE_ALL.value),
+            "contributor",
+        )
 
     src_lower = (lib_file.filename or "").lower()
     if src_lower.endswith(".step") or src_lower.endswith(".stp"):
@@ -5788,7 +5863,7 @@ async def get_file(
     duplicates = []
     duplicate_count = 0
     if file.file_hash:
-        dup_result = await db.execute(
+        duplicate_query = (
             select(LibraryFile, LibraryFolder.name)
             .outerjoin(LibraryFolder, LibraryFile.folder_id == LibraryFolder.id)
             .where(
@@ -5797,6 +5872,10 @@ async def get_file(
                 LibraryFile.deleted_at.is_(None),
             )
         )
+        visibility = await _file_visibility_filter(db, user, can_read_all)
+        if visibility is not None:
+            duplicate_query = duplicate_query.where(visibility)
+        dup_result = await db.execute(duplicate_query)
         for dup_file, dup_folder_name in dup_result.all():
             duplicates.append(
                 FileDuplicate(
@@ -5874,6 +5953,8 @@ async def update_file(
         raise HTTPException(status_code=404, detail="File not found")
 
     await _require_file_role(db, file, user, can_modify_all, "manager")
+    if data.folder_id is not None:
+        await _require_safe_file_move(db, file, data.folder_id or None, user, can_modify_all)
 
     if data.filename is not None:
         # Bambu printer SD cards are FAT32/exFAT; reject the same set Bambu
@@ -5924,11 +6005,9 @@ async def update_file(
     await db.commit()
     await db.refresh(file)
 
-    # Return full response. Bypass get_file's ownership gate — caller already
-    # passed update_file's ownership gate above, so we re-fetch + serialise
-    # directly instead of calling the route function (which would try to
-    # evaluate its own Depends() at call time and trip a TypeError).
-    return await get_file(file_id, db, auth_result=(None, True))
+    # Serialize in the caller's scope so duplicate metadata remains private.
+    # Pass auth_result explicitly rather than evaluating the route's Depends.
+    return await get_file(file_id, db, auth_result=(user, can_modify_all))
 
 
 @router.delete("/files/{file_id}")
@@ -6479,13 +6558,14 @@ async def move_files(
             continue
         try:
             await _require_file_role(db, file, user, can_modify_all, "manager")
-        except HTTPException:
+            await _require_safe_file_move(db, file, data.folder_id, user, can_modify_all)
+        except HTTPException as error:
             skipped += 1
             skipped_reasons.append(
                 {
                     "file_id": file_id,
-                    "code": "no_manager_access",
-                    "reason": "manager access is required to move this file",
+                    "code": "move_access_denied",
+                    "reason": str(error.detail),
                 }
             )
             continue

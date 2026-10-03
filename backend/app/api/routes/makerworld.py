@@ -30,7 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.routes.cloud import resolve_api_key_cloud_owner
-from backend.app.api.routes.library import _ensure_library_folder_visible, save_3mf_bytes_to_library
+from backend.app.api.routes.library import _require_folder_role, save_3mf_bytes_to_library
 from backend.app.core.auth import (
     RequirePermissionIfAuthEnabled,
     require_auth_if_enabled,
@@ -334,8 +334,14 @@ async def import_instance(
         target_folder = folder_q.scalar_one_or_none()
         if target_folder is None:
             raise HTTPException(status_code=404, detail="Folder not found")
-        if resource_user is not None and not resource_user.has_permission(Permission.LIBRARY_READ_ALL.value):
-            _ensure_library_folder_visible(target_folder, resource_user, False)
+        if resource_user is not None:
+            await _require_folder_role(
+                db,
+                target_folder,
+                resource_user,
+                resource_user.has_permission(Permission.LIBRARY_UPDATE_ALL.value),
+                "contributor",
+            )
         if target_folder.is_external and target_folder.external_readonly:
             raise HTTPException(
                 status_code=403,

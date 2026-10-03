@@ -20,7 +20,8 @@ async def engine():
                 "name VARCHAR(255) NOT NULL, "
                 "parent_id INTEGER NULL, "
                 "is_external BOOLEAN NOT NULL DEFAULT 0, "
-                "created_by_id INTEGER NULL"
+                "created_by_id INTEGER NULL, "
+                "ownership_reviewed BOOLEAN NOT NULL DEFAULT FALSE"
                 ")"
             )
         )
@@ -155,3 +156,14 @@ async def test_backfill_is_idempotent(engine):
 
     async with engine.connect() as conn:
         assert await _owners(conn) == {1: 42}
+
+
+@pytest.mark.asyncio
+async def test_explicit_unassigned_owner_survives_repeated_backfill(engine):
+    async with engine.begin() as conn:
+        await _folder(conn, 1)
+        await _file(conn, 1, 1, 42)
+        await conn.execute(text("UPDATE library_folders SET ownership_reviewed = TRUE WHERE id = 1"))
+        assert await _migrate_library_folder_owners(conn) == 0
+        assert await _migrate_library_folder_owners(conn) == 0
+        assert await _owners(conn) == {1: None}

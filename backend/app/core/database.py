@@ -1831,7 +1831,9 @@ async def _migrate_library_folder_owners(conn) -> int:
     from sqlalchemy import text
 
     folder_rows = (
-        await conn.execute(text("SELECT id, parent_id, is_external, created_by_id FROM library_folders"))
+        await conn.execute(
+            text("SELECT id, parent_id, is_external, created_by_id, ownership_reviewed FROM library_folders")
+        )
     ).fetchall()
     if not folder_rows:
         return 0
@@ -1842,7 +1844,10 @@ async def _migrate_library_folder_owners(conn) -> int:
 
     children: dict[int, list[int]] = defaultdict(list)
     folder_state: dict[int, tuple[int | None, bool, int | None]] = {}
-    for folder_id, parent_id, is_external, created_by_id in folder_rows:
+    reviewed_ids: set[int] = set()
+    for folder_id, parent_id, is_external, created_by_id, ownership_reviewed in folder_rows:
+        if ownership_reviewed:
+            reviewed_ids.add(int(folder_id))
         fid = int(folder_id)
         folder_state[fid] = (
             int(parent_id) if parent_id is not None else None,
@@ -1892,7 +1897,7 @@ async def _migrate_library_folder_owners(conn) -> int:
 
     updates: list[dict[str, int]] = []
     for folder_id, (_parent_id, is_external, created_by_id) in folder_state.items():
-        if created_by_id is not None or is_external:
+        if created_by_id is not None or is_external or folder_id in reviewed_ids:
             continue
         owners, ownerless, has_file = subtree_evidence(folder_id, set())
         if has_file and not ownerless and len(owners) == 1:
@@ -1946,6 +1951,10 @@ async def run_migrations(conn):
         "CREATE INDEX IF NOT EXISTS ix_library_folders_created_by_id ON library_folders (created_by_id)",
     )
 
+    await _safe_execute(
+        conn,
+        "ALTER TABLE library_folders ADD COLUMN ownership_reviewed BOOLEAN NOT NULL DEFAULT FALSE",
+    )
     await _migrate_library_folder_owners(conn)
 
     # Folder sharing/access grants. Existing installs have no shares, so this

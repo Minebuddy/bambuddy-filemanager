@@ -90,6 +90,8 @@ export function FolderSharingModal({ folder, onClose }: FolderSharingModalProps)
     });
     queryClient.invalidateQueries({ queryKey: ['library-folders'] });
     queryClient.invalidateQueries({ queryKey: ['library-files'] });
+    queryClient.invalidateQueries({ queryKey: ['library-folder-access-overview'] });
+    queryClient.invalidateQueries({ queryKey: ['library-stats'] });
   };
 
   const upsertMutation = useMutation({
