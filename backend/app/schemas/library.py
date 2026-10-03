@@ -38,15 +38,10 @@ class FolderUpdate(BaseModel):
 class FolderOwnerUpdate(BaseModel):
     """Admin-only folder ownership reassignment."""
 
-    created_by_id: int | None = None
-    recursive: bool = False
-
-
-class FolderOwnerResponse(BaseModel):
-    """Current owner of one library folder."""
-
-    id: int
+    # Required even when the explicit value is null, so an accidental empty
+    # PATCH body can never clear ownership.
     created_by_id: int | None
+    recursive: bool = False
 
 
 class FolderOwnerUpdateResponse(BaseModel):
