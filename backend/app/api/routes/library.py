@@ -60,15 +60,17 @@ from backend.app.schemas.library import (
     FileResponse as FileResponseSchema,
     FileUpdate,
     FileUploadResponse,
+    FolderAccessOverviewItem,
+    FolderAccessOverviewShare,
     FolderCreate,
     FolderOwnerUpdate,
     FolderOwnerUpdateResponse,
     FolderReadmeResponse,
+    FolderResponse,
     FolderSharePrincipal,
     FolderSharePrincipalsResponse,
     FolderShareResponse,
     FolderShareUpsert,
-    FolderResponse,
     FolderTreeItem,
     FolderUpdate,
     TagSummary,
@@ -1466,6 +1468,189 @@ def _folder_share_response(
         role=share.role,
         created_at=share.created_at,
     )
+
+
+@router.get(
+    "/access-overview/folders",
+    response_model=list[FolderAccessOverviewItem],
+)
+async def get_folder_access_overview(
+    db: AsyncSession = Depends(get_db),
+    _admin: User | None = RequireAdminIfAuthEnabled(),
+):
+    """List internal folders that need ownership or legacy-content review.
+
+    Unassigned folders stay unassigned until an administrator makes an explicit
+    decision. Mixed-owner and ownerless file contents are surfaced as evidence,
+    never used to infer or overwrite folder ownership here.
+    """
+    folder_rows = (
+        await db.execute(
+            select(
+                LibraryFolder.id,
+                LibraryFolder.name,
+                LibraryFolder.parent_id,
+                LibraryFolder.created_by_id,
+                LibraryFolder.is_external,
+            ).order_by(LibraryFolder.id)
+        )
+    ).all()
+    folders = {
+        int(row.id): {
+            "name": row.name,
+            "parent_id": int(row.parent_id) if row.parent_id is not None else None,
+            "owner_id": int(row.created_by_id) if row.created_by_id is not None else None,
+            "is_external": bool(row.is_external),
+        }
+        for row in folder_rows
+    }
+    if not folders:
+        return []
+
+    parent_ids = {folder_id: item["parent_id"] for folder_id, item in folders.items()}
+    # Exclude external mounts and all descendants of those mounts: the mount
+    # owns its filesystem semantics, and scanned children must not be offered
+    # as ordinary managed-library ownership candidates.
+    external_lineage: set[int] = set()
+    for folder_id in folders:
+        current: int | None = folder_id
+        seen: set[int] = set()
+        while current is not None and current in folders and current not in seen:
+            seen.add(current)
+            if folders[current]["is_external"]:
+                external_lineage.update(seen)
+                break
+            current = parent_ids[current]
+
+    direct_file_counts = dict.fromkeys(folders, 0)
+    direct_file_owners = {folder_id: set() for folder_id in folders}
+    direct_ownerless_counts = dict.fromkeys(folders, 0)
+    file_rows = (
+        await db.execute(
+            select(
+                LibraryFile.folder_id,
+                LibraryFile.created_by_id,
+                func.count(LibraryFile.id),
+            )
+            .where(
+                LibraryFile.folder_id.is_not(None),
+                LibraryFile.deleted_at.is_(None),
+            )
+            .group_by(LibraryFile.folder_id, LibraryFile.created_by_id)
+        )
+    ).all()
+    for folder_id, owner_id, owner_file_count in file_rows:
+        fid = int(folder_id)
+        if fid not in direct_file_counts:
+            continue
+        count = int(owner_file_count)
+        direct_file_counts[fid] += count
+        if owner_id is None:
+            direct_ownerless_counts[fid] += count
+        else:
+            direct_file_owners[fid].add(int(owner_id))
+
+    # Accumulate immediate file evidence into each ancestor. The visited set
+    # makes malformed cyclic legacy trees safe to inspect without recursion.
+    subtree_file_counts = direct_file_counts.copy()
+    subtree_file_owners = {
+        folder_id: set(owner_ids) for folder_id, owner_ids in direct_file_owners.items()
+    }
+    subtree_ownerless_counts = direct_ownerless_counts.copy()
+    for folder_id in folders:
+        current = parent_ids[folder_id]
+        seen = {folder_id}
+        while current is not None and current in folders and current not in seen:
+            seen.add(current)
+            subtree_file_counts[current] += direct_file_counts[folder_id]
+            subtree_ownerless_counts[current] += direct_ownerless_counts[folder_id]
+            subtree_file_owners[current].update(direct_file_owners[folder_id])
+            current = parent_ids[current]
+
+    shares_by_folder: dict[int, list[FolderAccessOverviewShare]] = {}
+    share_rows = (
+        await db.execute(
+            select(
+                LibraryFolderShare.folder_id,
+                LibraryFolderShare.user_id,
+                LibraryFolderShare.group_id,
+                LibraryFolderShare.role,
+                User.username,
+                Group.name,
+            )
+            .outerjoin(User, LibraryFolderShare.user_id == User.id)
+            .outerjoin(Group, LibraryFolderShare.group_id == Group.id)
+            .order_by(LibraryFolderShare.id)
+        )
+    ).all()
+    for folder_id, user_id, group_id, role, username, group_name in share_rows:
+        fid = int(folder_id)
+        principal_id = int(user_id if user_id is not None else group_id)
+        principal_type = "user" if user_id is not None else "group"
+        shares_by_folder.setdefault(fid, []).append(
+            FolderAccessOverviewShare(
+                source_folder_id=fid,
+                source_folder_name=folders[fid]["name"],
+                principal_type=principal_type,
+                principal_id=principal_id,
+                principal_name=username or group_name or "Unknown",
+                role=role,
+            )
+        )
+
+    owner_ids = {item["owner_id"] for item in folders.values() if item["owner_id"] is not None}
+    owner_names: dict[int, str] = {}
+    if owner_ids:
+        owner_rows = (
+            await db.execute(select(User.id, User.username).where(User.id.in_(owner_ids)))
+        ).all()
+        owner_names = {int(user_id): username for user_id, username in owner_rows}
+
+    overview: list[FolderAccessOverviewItem] = []
+    for folder_id, item in folders.items():
+        if folder_id in external_lineage:
+            continue
+        owners = subtree_file_owners[folder_id]
+        ownerless_count = subtree_ownerless_counts[folder_id]
+        is_ambiguous = len(owners) > 1 or ownerless_count > 0
+        if item["owner_id"] is not None and not is_ambiguous:
+            continue
+
+        path_parts: list[str] = []
+        current: int | None = folder_id
+        seen: set[int] = set()
+        while current is not None and current in folders and current not in seen:
+            seen.add(current)
+            path_parts.append(folders[current]["name"])
+            current = parent_ids[current]
+        path = " / ".join(reversed(path_parts))
+
+        inherited_shares: list[FolderAccessOverviewShare] = []
+        current = parent_ids[folder_id]
+        seen = {folder_id}
+        while current is not None and current in folders and current not in seen:
+            seen.add(current)
+            inherited_shares.extend(shares_by_folder.get(current, []))
+            current = parent_ids[current]
+
+        owner_id = item["owner_id"]
+        overview.append(
+            FolderAccessOverviewItem(
+                id=folder_id,
+                name=item["name"],
+                path=path,
+                parent_id=item["parent_id"],
+                created_by_id=owner_id,
+                owner_name=owner_names.get(owner_id) if owner_id is not None else None,
+                file_count=subtree_file_counts[folder_id],
+                distinct_file_owners=len(owners),
+                ownerless_file_count=ownerless_count,
+                is_ambiguous=is_ambiguous,
+                direct_shares=shares_by_folder.get(folder_id, []),
+                inherited_shares=inherited_shares,
+            )
+        )
+    return overview
 
 
 @router.get("/folders/{folder_id}/shares", response_model=list[FolderShareResponse])

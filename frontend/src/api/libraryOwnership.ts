@@ -13,6 +13,30 @@ export interface FolderOwnerUpdateResult {
   updated_folders: number;
 }
 
+export interface FolderAccessOverviewShare {
+  source_folder_id: number;
+  source_folder_name: string;
+  principal_type: 'user' | 'group';
+  principal_id: number;
+  principal_name: string;
+  role: 'viewer' | 'contributor' | 'manager';
+}
+
+export interface FolderAccessOverviewItem {
+  id: number;
+  name: string;
+  path: string;
+  parent_id: number | null;
+  created_by_id: number | null;
+  owner_name: string | null;
+  file_count: number;
+  distinct_file_owners: number;
+  ownerless_file_count: number;
+  is_ambiguous: boolean;
+  direct_shares: FolderAccessOverviewShare[];
+  inherited_shares: FolderAccessOverviewShare[];
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -36,6 +60,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const libraryOwnershipApi = {
+  getAccessOverview: () =>
+    request<FolderAccessOverviewItem[]>('/library/access-overview/folders'),
+
   updateFolderOwner: (folderId: number, data: FolderOwnerUpdate) =>
     request<FolderOwnerUpdateResult>(`/library/folders/${folderId}/owner`, {
       method: 'PATCH',

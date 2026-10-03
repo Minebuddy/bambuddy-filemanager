@@ -91,6 +91,34 @@ class FolderSharePrincipalsResponse(BaseModel):
     groups: list[FolderSharePrincipal]
 
 
+class FolderAccessOverviewShare(BaseModel):
+    """A direct grant shown in the admin library access overview."""
+
+    source_folder_id: int
+    source_folder_name: str
+    principal_type: FolderSharePrincipalType
+    principal_id: int
+    principal_name: str
+    role: FolderShareRole
+
+
+class FolderAccessOverviewItem(BaseModel):
+    """One unassigned or ambiguous internal folder for admin review."""
+
+    id: int
+    name: str
+    path: str
+    parent_id: int | None
+    created_by_id: int | None
+    owner_name: str | None
+    file_count: int
+    distinct_file_owners: int
+    ownerless_file_count: int
+    is_ambiguous: bool
+    direct_shares: list[FolderAccessOverviewShare]
+    inherited_shares: list[FolderAccessOverviewShare]
+
+
 class FolderResponse(BaseModel):
     """Schema for folder response."""
 

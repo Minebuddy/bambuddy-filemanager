@@ -81,6 +81,7 @@ import { BulkTagsPickerModal } from '../components/BulkTagsPickerModal';
 import { FileUploadModal } from '../components/FileUploadModal';
 import { FolderReadmePanel } from '../components/FolderReadmePanel';
 import { FolderOwnerModal } from '../components/FolderOwnerModal';
+import { LibraryAccessOverviewModal } from '../components/LibraryAccessOverviewModal';
 import { FolderSharingModal } from '../components/FolderSharingModal';
 import { LibraryTagsModal } from '../components/LibraryTagsModal';
 import { LibraryFileDetailsModal } from '../components/LibraryFileDetailsModal';
@@ -1648,6 +1649,7 @@ export function FileManagerPage() {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [droppedFiles, setDroppedFiles] = useState<File[]>([]);
   const [showPurgeModal, setShowPurgeModal] = useState(false);
+  const [showAccessOverview, setShowAccessOverview] = useState(false);
   // Tag UI state (#1268). selectedTagIds is the AND-style filter applied to
   // the listing; setting it bypasses folder scoping on the server so
   // "every toy" works regardless of which folder is currently selected.
@@ -2834,6 +2836,20 @@ export function FileManagerPage() {
             <TagIcon className="w-4 h-4 mr-2" />
             {t('fileManager.tags.manage')}
           </Button>
+          {isAdmin && (
+            <Button
+              variant="secondary"
+              onClick={() => setShowAccessOverview(true)}
+              title={t('fileManager.accessOverview.title', {
+                defaultValue: 'Review unassigned and ambiguous library folders',
+              })}
+            >
+              <Share2 className="w-4 h-4 mr-2" />
+              {t('fileManager.accessOverview.button', {
+                defaultValue: 'Review access',
+              })}
+            </Button>
+          )}
           {hasPermission('library:purge') && (
             <Button
               variant="secondary"
@@ -3940,6 +3956,21 @@ export function FileManagerPage() {
 
       {showPurgeModal && (
         <PurgeOldFilesModal onClose={() => setShowPurgeModal(false)} />
+      )}
+
+      {showAccessOverview && isAdmin && (
+        <LibraryAccessOverviewModal
+          folders={sortedFolders ?? []}
+          onClose={() => setShowAccessOverview(false)}
+          onManageOwner={(folder) => {
+            setShowAccessOverview(false);
+            setOwnerFolder(folder);
+          }}
+          onManageAccess={(folder) => {
+            setShowAccessOverview(false);
+            setSharingFolder(folder);
+          }}
+        />
       )}
 
       <LibraryTagsModal

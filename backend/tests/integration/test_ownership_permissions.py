@@ -3068,3 +3068,134 @@ class TestLibraryAddToQueueOwnership(TestOwnershipPermissionsSetup):
         )
         # READ_ALL sees it and reaches the on-disk check.
         assert admin.json()["detail"]["errors"][0]["error"] == "File not found on disk"
+
+
+class TestLibraryAccessOverview(TestOwnershipPermissionsSetup):
+    """The admin review reports uncertainty without inferring ownership."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_overview_is_admin_only_and_reports_legacy_evidence(
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        db_session,
+    ):
+        from backend.app.models.group import Group
+        from backend.app.models.library import LibraryFile, LibraryFolderShare
+
+        parent = LibraryFolder(
+            name="Teacher project",
+            parent_id=None,
+            created_by_id=auth_setup["operator2_user"]["id"],
+            is_external=False,
+            external_readonly=False,
+            external_show_hidden=False,
+        )
+        db_session.add(parent)
+        await db_session.flush()
+
+        child = LibraryFolder(
+            name="Legacy student work",
+            parent_id=parent.id,
+            created_by_id=None,
+            is_external=False,
+            external_readonly=False,
+            external_show_hidden=False,
+        )
+        external = LibraryFolder(
+            name="NAS mount",
+            parent_id=None,
+            created_by_id=None,
+            is_external=True,
+            external_readonly=True,
+            external_show_hidden=False,
+        )
+        db_session.add_all([child, external])
+        await db_session.flush()
+
+        group = Group(name="Class 3B", description="Project contributors", permissions=[])
+        db_session.add(group)
+        await db_session.flush()
+
+        db_session.add_all(
+            [
+                LibraryFile(
+                    filename="student-a.3mf",
+                    file_path="library/student-a.3mf",
+                    file_type="3mf",
+                    file_size=10,
+                    folder_id=child.id,
+                    created_by_id=auth_setup["operator_user"]["id"],
+                ),
+                LibraryFile(
+                    filename="student-b.3mf",
+                    file_path="library/student-b.3mf",
+                    file_type="3mf",
+                    file_size=10,
+                    folder_id=child.id,
+                    created_by_id=auth_setup["operator2_user"]["id"],
+                ),
+                LibraryFile(
+                    filename="legacy.3mf",
+                    file_path="library/legacy.3mf",
+                    file_type="3mf",
+                    file_size=10,
+                    folder_id=child.id,
+                    created_by_id=None,
+                ),
+            ]
+        )
+        db_session.add_all(
+            [
+                LibraryFolderShare(
+                    folder_id=parent.id,
+                    user_id=auth_setup["operator_user"]["id"],
+                    group_id=None,
+                    role="contributor",
+                    created_by_id=auth_setup["operator2_user"]["id"],
+                ),
+                LibraryFolderShare(
+                    folder_id=child.id,
+                    user_id=None,
+                    group_id=group.id,
+                    role="viewer",
+                    created_by_id=auth_setup["operator2_user"]["id"],
+                ),
+            ]
+        )
+        await db_session.commit()
+
+        forbidden = await async_client.get(
+            "/api/v1/library/access-overview/folders",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert forbidden.status_code == 403
+
+        response = await async_client.get(
+            "/api/v1/library/access-overview/folders",
+            headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+        )
+        assert response.status_code == 200
+        items = {item["id"]: item for item in response.json()}
+
+        assert child.id in items
+        row = items[child.id]
+        assert row["path"] == "Teacher project / Legacy student work"
+        assert row["created_by_id"] is None
+        assert row["file_count"] == 3
+        assert row["distinct_file_owners"] == 2
+        assert row["ownerless_file_count"] == 1
+        assert row["is_ambiguous"] is True
+        assert [(share["principal_name"], share["role"]) for share in row["direct_shares"]] == [
+            ("Class 3B", "viewer")
+        ]
+        assert [
+            (share["principal_name"], share["role"])
+            for share in row["inherited_shares"]
+        ] == [("operator1", "contributor")]
+
+        # Reviewing ambiguous legacy contents does not reassign folder ownership.
+        await db_session.refresh(child)
+        assert child.created_by_id is None
+        assert external.id not in items
