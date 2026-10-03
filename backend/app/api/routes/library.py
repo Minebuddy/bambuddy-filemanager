@@ -1246,8 +1246,14 @@ async def create_folder(
         parent = parent_result.scalar_one_or_none()
         if parent is None:
             raise HTTPException(status_code=404, detail="Parent folder not found")
-        if current_user is not None and not current_user.has_permission(Permission.LIBRARY_READ_ALL.value):
-            await _ensure_library_folder_visible(db, parent, current_user, False)
+        if current_user is not None:
+            await _require_folder_role(
+                db,
+                parent,
+                current_user,
+                current_user.has_permission(Permission.LIBRARY_UPDATE_ALL.value),
+                "contributor",
+            )
 
     project_name = None
     if data.project_id is not None:
@@ -1674,8 +1680,7 @@ async def update_folder(
 
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
-    if not can_modify_all:
-        await _ensure_library_folder_visible(db, folder, user, False)
+    await _require_folder_role(db, folder, user, can_modify_all, "manager")
 
     if data.name is not None:
         folder.name = data.name
@@ -1689,8 +1694,13 @@ async def update_folder(
             destination = destination_result.scalar_one_or_none()
             if destination is None:
                 raise HTTPException(status_code=404, detail="Parent folder not found")
-            if not can_modify_all:
-                await _ensure_library_folder_visible(db, destination, user, False)
+            await _require_folder_role(
+                db,
+                destination,
+                user,
+                can_modify_all,
+                "contributor",
+            )
 
             current_id = data.parent_id
             while current_id is not None:
@@ -1731,8 +1741,6 @@ async def update_folder(
         LibraryFile.folder_id == folder_id,
         LibraryFile.deleted_at.is_(None),
     )
-    if user is not None and not can_modify_all:
-        agg_query = agg_query.where(LibraryFile.created_by_id == user.id)
     agg_result = await db.execute(agg_query)
     file_count, latest_file = agg_result.one()
     file_count = file_count or 0
@@ -2683,8 +2691,14 @@ async def upload_file(
             target_folder = folder_result.scalar_one_or_none()
             if not target_folder:
                 raise HTTPException(status_code=404, detail="Folder not found")
-            if current_user is not None and not current_user.has_permission(Permission.LIBRARY_READ_ALL.value):
-                await _ensure_library_folder_visible(db, target_folder, current_user, False)
+            if current_user is not None:
+                await _require_folder_role(
+                    db,
+                    target_folder,
+                    current_user,
+                    current_user.has_permission(Permission.LIBRARY_UPDATE_ALL.value),
+                    "contributor",
+                )
 
         # Writable external folders write through to the mount so the file is
         # visible outside Bambuddy (#1112); everything else lands under the
@@ -2859,8 +2873,14 @@ async def extract_zip_file(
         target_folder = folder_result.scalar_one_or_none()
         if not target_folder:
             raise HTTPException(status_code=404, detail="Target folder not found")
-        if current_user is not None and not current_user.has_permission(Permission.LIBRARY_READ_ALL.value):
-            await _ensure_library_folder_visible(db, target_folder, current_user, False)
+        if current_user is not None:
+            await _require_folder_role(
+                db,
+                target_folder,
+                current_user,
+                current_user.has_permission(Permission.LIBRARY_UPDATE_ALL.value),
+                "contributor",
+            )
         if target_folder.is_external and target_folder.external_readonly:
             raise HTTPException(status_code=403, detail="Cannot extract ZIP to a read-only external folder")
         if target_folder.is_external:
@@ -5650,10 +5670,7 @@ async def update_file(
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
 
-    # Ownership check
-    if not can_modify_all:
-        if file.created_by_id != user.id:
-            raise HTTPException(status_code=403, detail="You can only update your own files")
+    await _require_file_role(db, file, user, can_modify_all, "manager")
 
     if data.filename is not None:
         # Bambu printer SD cards are FAT32/exFAT; reject the same set Bambu
@@ -5676,8 +5693,13 @@ async def update_file(
             destination = folder_result.scalar_one_or_none()
             if destination is None:
                 raise HTTPException(status_code=404, detail="Folder not found")
-            if not can_modify_all:
-                await _ensure_library_folder_visible(db, destination, user, False)
+            await _require_folder_role(
+                db,
+                destination,
+                user,
+                can_modify_all,
+                "contributor",
+            )
             file.folder_id = data.folder_id
 
     if data.project_id is not None:
@@ -5733,10 +5755,7 @@ async def delete_file(
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
 
-    # Ownership check
-    if not can_modify_all:
-        if file.created_by_id != user.id:
-            raise HTTPException(status_code=403, detail="You can only delete your own files")
+    await _require_file_role(db, file, user, can_modify_all, "manager")
 
     if file.is_external:
         # External files bypass the trash — just drop the DB row + our thumbnail.
@@ -6225,8 +6244,13 @@ async def move_files(
         target_folder = folder_result.scalar_one_or_none()
         if not target_folder:
             raise HTTPException(status_code=404, detail="Folder not found")
-        if not can_modify_all:
-            await _ensure_library_folder_visible(db, target_folder, user, False)
+        await _require_folder_role(
+            db,
+            target_folder,
+            user,
+            can_modify_all,
+            "contributor",
+        )
         if target_folder.is_external and target_folder.external_readonly:
             raise HTTPException(status_code=403, detail="Cannot move files to a read-only external folder")
 
@@ -6243,10 +6267,17 @@ async def move_files(
         file = result.scalar_one_or_none()
         if not file:
             continue
-        # Ownership check
-        if not can_modify_all and file.created_by_id != user.id:
+        try:
+            await _require_file_role(db, file, user, can_modify_all, "manager")
+        except HTTPException:
             skipped += 1
-            skipped_reasons.append({"file_id": file_id, "code": "not_owner", "reason": "not the file owner"})
+            skipped_reasons.append(
+                {
+                    "file_id": file_id,
+                    "code": "no_manager_access",
+                    "reason": "manager access is required to move this file",
+                }
+            )
             continue
 
         # No bytes need to move when both ends are managed (same-boundary).
