@@ -25,6 +25,7 @@ from backend.app.api.routes.cloud import resolve_api_key_cloud_owner
 from backend.app.api.routes.library_variants import normalize_model_name, resolve_variant_model
 from backend.app.api.routes.print_queue import _extract_filament_types_from_3mf
 from backend.app.core.auth import (
+    RequireAdminIfAuthEnabled,
     require_media_token_ownership,
     require_ownership_permission,
     require_permission_if_auth_enabled,
@@ -59,6 +60,8 @@ from backend.app.schemas.library import (
     FileUpdate,
     FileUploadResponse,
     FolderCreate,
+    FolderOwnerUpdate,
+    FolderOwnerUpdateResponse,
     FolderReadmeResponse,
     FolderResponse,
     FolderTreeItem,
@@ -1003,6 +1006,7 @@ async def list_folders(
             id=folder.id,
             name=folder.name,
             parent_id=folder.parent_id,
+            created_by_id=folder.created_by_id,
             project_id=folder.project_id,
             archive_id=folder.archive_id,
             project_name=project_name,
@@ -1223,6 +1227,7 @@ async def create_folder(
         id=folder.id,
         name=folder.name,
         parent_id=folder.parent_id,
+        created_by_id=folder.created_by_id,
         project_id=folder.project_id,
         archive_id=folder.archive_id,
         project_name=project_name,
@@ -1282,6 +1287,7 @@ async def get_folder(
         id=folder.id,
         name=folder.name,
         parent_id=folder.parent_id,
+        created_by_id=folder.created_by_id,
         project_id=folder.project_id,
         archive_id=folder.archive_id,
         project_name=project_name,
@@ -1361,6 +1367,60 @@ async def get_folder_readme(
     content = raw.decode("utf-8", errors="replace")
 
     return FolderReadmeResponse(filename=pick.filename, content=content, truncated=truncated)
+
+
+@router.patch("/folders/{folder_id}/owner", response_model=FolderOwnerUpdateResponse)
+async def update_folder_owner(
+    folder_id: int,
+    data: FolderOwnerUpdate,
+    db: AsyncSession = Depends(get_db),
+    _admin: User | None = Depends(RequireAdminIfAuthEnabled()),
+):
+    """Admin-only assignment or clearing of internal folder ownership.
+
+    This changes folder ownership only. File ownership is deliberately left
+    untouched. With recursive=True the owner is applied to every internal
+    descendant; external/system folders remain outside user ownership.
+    """
+    result = await db.execute(select(LibraryFolder).where(LibraryFolder.id == folder_id))
+    folder = result.scalar_one_or_none()
+    if folder is None:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    if folder.is_external:
+        raise HTTPException(status_code=400, detail="External folders cannot be assigned to a user")
+
+    if data.created_by_id is not None:
+        user_result = await db.execute(select(User.id).where(User.id == data.created_by_id))
+        if user_result.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="User not found")
+
+    target_ids = [folder.id]
+    if data.recursive:
+        queue = [folder.id]
+        while queue:
+            parent_id = queue.pop()
+            children_result = await db.execute(
+                select(LibraryFolder.id, LibraryFolder.is_external).where(
+                    LibraryFolder.parent_id == parent_id
+                )
+            )
+            for child_id, is_external in children_result.all():
+                if not is_external:
+                    target_ids.append(child_id)
+                    queue.append(child_id)
+
+    await db.execute(
+        update(LibraryFolder)
+        .where(LibraryFolder.id.in_(target_ids))
+        .values(created_by_id=data.created_by_id)
+    )
+    await db.commit()
+
+    return FolderOwnerUpdateResponse(
+        id=folder.id,
+        created_by_id=data.created_by_id,
+        updated_folders=len(target_ids),
+    )
 
 
 @router.put("/folders/{folder_id}", response_model=FolderResponse)
@@ -1459,6 +1519,7 @@ async def update_folder(
         id=folder.id,
         name=folder.name,
         parent_id=folder.parent_id,
+        created_by_id=folder.created_by_id,
         project_id=folder.project_id,
         archive_id=folder.archive_id,
         project_name=project_name,

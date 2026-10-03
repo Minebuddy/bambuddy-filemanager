@@ -63,6 +63,7 @@ class FolderResponse(BaseModel):
     id: int
     name: str
     parent_id: int | None
+    created_by_id: int | None = None
     project_id: int | None = None
     archive_id: int | None = None
     project_name: str | None = None
@@ -104,6 +105,7 @@ class FolderTreeItem(BaseModel):
     id: int
     name: str
     parent_id: int | None
+    created_by_id: int | None = None
     project_id: int | None = None
     archive_id: int | None = None
     project_name: str | None = None
