@@ -186,6 +186,7 @@ async def _require_folder_role(
         return
     if user is None:
         raise HTTPException(status_code=403, detail="Folder access denied")
+    await _ensure_library_folder_visible(db, folder, user, can_read_all=False)
     role = await effective_folder_role(db, folder.id, user)
     if not role_allows(role, required_role):
         raise HTTPException(status_code=403, detail=f"Folder requires {required_role} access")
@@ -1020,8 +1021,8 @@ async def list_folders(
     result = await db.execute(folder_query.order_by(LibraryFolder.name))
     rows = result.all()
 
-    # Counts/activity must use the same file visibility scope as the file pane;
-    # otherwise a read_own user can learn that hidden files exist in a folder.
+    # File counts and activity must not reveal metadata for another user's
+    # files merely because the caller can see or manage their containing folder.
     file_counts_query = (
         select(LibraryFile.folder_id, func.count(LibraryFile.id))
         .where(LibraryFile.folder_id.isnot(None), LibraryFile.deleted_at.is_(None))
@@ -1030,6 +1031,11 @@ async def list_folders(
     if visible_folder_ids is not None:
         file_counts_query = file_counts_query.where(
             LibraryFile.folder_id.in_(visible_folder_ids)
+        )
+        # The folder count must not disclose files that the caller cannot
+        # manage under library:delete_own, even when they own the folder.
+        file_counts_query = file_counts_query.where(
+            LibraryFile.created_by_id == user.id
         )
     file_counts_result = await db.execute(file_counts_query)
     file_counts = dict(file_counts_result.all())
@@ -1045,6 +1051,9 @@ async def list_folders(
     if visible_folder_ids is not None:
         latest_file_activity_query = latest_file_activity_query.where(
             LibraryFile.folder_id.in_(visible_folder_ids)
+        )
+        latest_file_activity_query = latest_file_activity_query.where(
+            LibraryFile.created_by_id == user.id
         )
     latest_file_activity_result = await db.execute(latest_file_activity_query)
     latest_file_activity = dict(latest_file_activity_result.all())
@@ -1978,11 +1987,14 @@ async def _restricted_owned_folder_delete_blocker(
     roles = await folder_access_roles(db, user)
     if not role_allows(roles.get(folder.id), "manager"):
         return "Manager access is required to delete this folder"
+    if folder.created_by_id != user.id:
+        return "You can only delete your own folders"
     if folder.is_external:
         return "External folders can only be deleted by users with library:delete_all"
     if folder.project_id is not None or folder.archive_id is not None:
         return "Folders linked to a project or archive can only be deleted by users with library:delete_all"
 
+    tree_folder_ids = [folder.id]
     queue = [folder.id]
     while queue:
         parent_id = queue.pop()
@@ -1992,14 +2004,32 @@ async def _restricted_owned_folder_delete_blocker(
                 LibraryFolder.is_external,
                 LibraryFolder.project_id,
                 LibraryFolder.archive_id,
+                LibraryFolder.created_by_id,
             ).where(LibraryFolder.parent_id == parent_id)
         )
-        for child_id, is_external, project_id, archive_id in children_result.all():
+        for child_id, is_external, project_id, archive_id, created_by_id in children_result.all():
             if not role_allows(roles.get(child_id), "manager"):
                 return "Folder tree contains a subfolder without manager access"
+            if created_by_id != user.id:
+                return "Folder tree contains a subfolder owned by another user"
             if is_external or project_id is not None or archive_id is not None:
                 return "Folder tree contains a protected external or linked subfolder"
+            tree_folder_ids.append(child_id)
             queue.append(child_id)
+
+    foreign_file = await db.execute(
+        select(LibraryFile.id)
+        .where(
+            LibraryFile.folder_id.in_(tree_folder_ids),
+            or_(
+                LibraryFile.created_by_id.is_(None),
+                LibraryFile.created_by_id != user.id,
+            ),
+        )
+        .limit(1)
+    )
+    if foreign_file.scalar_one_or_none() is not None:
+        return "Folder tree contains files owned by another user"
 
     return None
 
@@ -5974,6 +6004,9 @@ async def delete_file(
 
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
+
+    if user is not None and not can_modify_all and file.created_by_id != user.id and file.folder_id is None:
+        raise HTTPException(status_code=403, detail="You can only delete your own files")
 
     await _require_file_role(db, file, user, can_modify_all, "manager")
 

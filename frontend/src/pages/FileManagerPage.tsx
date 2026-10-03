@@ -825,17 +825,21 @@ function FolderActionsMenu({ folder, onDelete, onLink, onRename, onManageOwner, 
   const isLinked = folder.project_id || folder.archive_id;
   const isExternal = folder.is_external;
   const hasManagerAccess = isAdmin || folder.access_role === 'manager';
-  const canDeleteFolder =
-    hasPermission('library:delete_all') ||
-    (
-      hasPermission('library:delete_own') &&
-      hasManagerAccess &&
-      !isExternal &&
-      !isLinked
-    );
+  const ownsFolder = currentUserId !== null && folder.created_by_id === currentUserId;
+  const hasDeleteAll = hasPermission('library:delete_all');
+  const canDeleteOwnFolder =
+    hasPermission('library:delete_own') &&
+    ownsFolder &&
+    hasManagerAccess &&
+    !isExternal &&
+    !isLinked;
+  const isEmptyFolder = folder.file_count === 0 && folder.children.length === 0;
+  const canDeleteFolder = hasDeleteAll || (canDeleteOwnFolder && isEmptyFolder);
   const deleteDisabledTooltip = canDeleteFolder
     ? undefined
-    : t('fileManager.noPermissionDeleteFolder');
+    : canDeleteOwnFolder && !isEmptyFolder
+      ? t('fileManager.onlyEmptyFoldersDeletable')
+      : t('fileManager.noPermissionDeleteFolder');
   const canRename =
     hasPermission('library:update_all') ||
     (hasPermission('library:update_own') && hasManagerAccess);

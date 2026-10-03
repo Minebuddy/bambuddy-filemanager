@@ -390,7 +390,7 @@ async def _resolve_source(
     if library_file_id is not None:
         lib = (await db.execute(select(LibraryFile).where(LibraryFile.id == library_file_id))).scalar_one_or_none()
         can_read_all = user is None or user.has_permission(Permission.LIBRARY_READ_ALL.value)
-        lib = _ensure_library_file_visible(lib, user, can_read_all)
+        lib = await _ensure_library_file_visible(db, lib, user, can_read_all)
         src_path = (
             Path(app_settings.base_dir) / lib.file_path
         )  # SEC-PATH-OK: lib.file_path is a LibraryFile DB column set only by the upload route, which writes a UUID-named file under base_dir/library_files/.

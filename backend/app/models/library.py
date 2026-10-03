@@ -1,11 +1,28 @@
 """Library models for file manager functionality."""
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, Select, String, Text, UniqueConstraint, func, select
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Select,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    select,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.core.database import Base
+
+if TYPE_CHECKING:
+    from backend.app.models.group import Group
 
 
 class LibraryFolder(Base):
