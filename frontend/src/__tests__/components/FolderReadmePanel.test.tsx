@@ -17,6 +17,13 @@ describe('FolderReadmePanel', () => {
     // with the collapse preference unset (expanded).
     vi.mocked(localStorage.getItem).mockReturnValue(null);
     vi.mocked(localStorage.setItem).mockClear();
+    // Ownership repair is admin-only and orthogonal to README behaviour.
+    // Default it to unavailable so the pre-existing README tests stay focused.
+    server.use(
+      http.get('/api/v1/library/folders/:id/owner', () =>
+        HttpResponse.json({ detail: 'Owner metadata unavailable' }, { status: 404 }),
+      ),
+    );
   });
 
   it('renders nothing when the folder has no markdown (404)', async () => {
@@ -109,6 +116,69 @@ describe('FolderReadmePanel', () => {
     // Reopen control is present; the markdown body is not rendered.
     expect((await screen.findAllByRole('button', { name: 'Show README' })).length).toBeGreaterThan(0);
     expect(screen.queryByRole('heading', { name: 'Robot model' })).not.toBeInTheDocument();
+  });
+
+  it('lets an admin assign an owner to a folder with no README', async () => {
+    let patchBody: unknown = null;
+    server.use(
+      http.get('/api/v1/library/folders/:id/readme', () =>
+        HttpResponse.json({ detail: 'No markdown' }, { status: 404 }),
+      ),
+      http.get('/api/v1/library/folders/:id/owner', ({ params }) =>
+        HttpResponse.json({ id: Number(params.id), created_by_id: null }),
+      ),
+      http.get('/api/v1/users/slim', () =>
+        HttpResponse.json([
+          { id: 7, username: 'student-a' },
+          { id: 8, username: 'student-b' },
+        ]),
+      ),
+      http.patch('/api/v1/library/folders/:id/owner', async ({ request, params }) => {
+        patchBody = await request.json();
+        return HttpResponse.json({
+          id: Number(params.id),
+          created_by_id: 7,
+          updated_folders: 2,
+        });
+      }),
+    );
+
+    const user = userEvent.setup();
+    render(<FolderReadmePanel folderId={21} />);
+
+    const ownerSelect = await screen.findByRole('combobox');
+    expect(ownerSelect).toHaveValue('');
+    await user.selectOptions(ownerSelect, '7');
+    await user.click(screen.getByRole('checkbox', { name: 'Including subfolders' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(patchBody).toEqual({ created_by_id: 7, recursive: true });
+    });
+    expect(await screen.findByText('Success')).toBeInTheDocument();
+  });
+
+  it('preselects the current folder owner for an admin', async () => {
+    server.use(
+      http.get('/api/v1/library/folders/:id/readme', () =>
+        HttpResponse.json({ detail: 'No markdown' }, { status: 404 }),
+      ),
+      http.get('/api/v1/library/folders/:id/owner', ({ params }) =>
+        HttpResponse.json({ id: Number(params.id), created_by_id: 8 }),
+      ),
+      http.get('/api/v1/users/slim', () =>
+        HttpResponse.json([
+          { id: 7, username: 'student-a' },
+          { id: 8, username: 'student-b' },
+        ]),
+      ),
+    );
+
+    render(<FolderReadmePanel folderId={22} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('combobox')).toHaveValue('8');
+    });
   });
 
   /**
