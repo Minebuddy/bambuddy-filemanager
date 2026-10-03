@@ -1382,22 +1382,15 @@ async def update_folder_owner(
     untouched. With recursive=True the owner is applied to every internal
     descendant; external/system folders remain outside user ownership.
     """
-    result = await db.execute(
-        select(LibraryFolder).where(LibraryFolder.id == folder_id)
-    )
+    result = await db.execute(select(LibraryFolder).where(LibraryFolder.id == folder_id))
     folder = result.scalar_one_or_none()
     if folder is None:
         raise HTTPException(status_code=404, detail="Folder not found")
     if folder.is_external:
-        raise HTTPException(
-            status_code=400,
-            detail="External folders cannot be assigned to a user",
-        )
+        raise HTTPException(status_code=400, detail="External folders cannot be assigned to a user")
 
     if data.created_by_id is not None:
-        user_result = await db.execute(
-            select(User.id).where(User.id == data.created_by_id)
-        )
+        user_result = await db.execute(select(User.id).where(User.id == data.created_by_id))
         if user_result.scalar_one_or_none() is None:
             raise HTTPException(status_code=404, detail="User not found")
 
@@ -1407,9 +1400,7 @@ async def update_folder_owner(
         while queue:
             parent_id = queue.pop()
             children_result = await db.execute(
-                select(LibraryFolder.id, LibraryFolder.is_external).where(
-                    LibraryFolder.parent_id == parent_id
-                )
+                select(LibraryFolder.id, LibraryFolder.is_external).where(LibraryFolder.parent_id == parent_id)
             )
             for child_id, is_external in children_result.all():
                 if not is_external:
@@ -1417,9 +1408,7 @@ async def update_folder_owner(
                     queue.append(child_id)
 
     await db.execute(
-        update(LibraryFolder)
-        .where(LibraryFolder.id.in_(target_ids))
-        .values(created_by_id=data.created_by_id)
+        update(LibraryFolder).where(LibraryFolder.id.in_(target_ids)).values(created_by_id=data.created_by_id)
     )
     await db.commit()
 

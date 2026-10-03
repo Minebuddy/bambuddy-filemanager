@@ -1149,9 +1149,7 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_create_folder_records_authenticated_owner(
-        self, async_client: AsyncClient, auth_setup, db_session
-    ):
+    async def test_create_folder_records_authenticated_owner(self, async_client: AsyncClient, auth_setup, db_session):
         response = await async_client.post(
             "/api/v1/library/folders",
             json={"name": "MyOwnedFolder"},
@@ -1307,50 +1305,55 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
     @pytest.mark.asyncio
     @pytest.mark.integration
     async def test_admin_can_assign_folder_owner(
-        self, async_client: AsyncClient, auth_setup, library_folder_factory, db_session
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        library_folder_factory,
+        db_session,
     ):
         folder = await library_folder_factory(name="LegacyUnassigned")
         folder_id = folder.id
+
         response = await async_client.patch(
             f"/api/v1/library/folders/{folder_id}/owner",
-            json={
-                "created_by_id": auth_setup["operator_user"]["id"],
-                "recursive": False,
-            },
+            json={"created_by_id": auth_setup["operator_user"]["id"], "recursive": False},
             headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
         )
+
         assert response.status_code == 200
         assert response.json()["updated_folders"] == 1
+
         db_session.expire_all()
-        updated = (
-            await db_session.execute(
-                select(LibraryFolder).where(LibraryFolder.id == folder_id)
-            )
-        ).scalar_one()
+        updated = await db_session.get(LibraryFolder, folder_id)
+        assert updated is not None
         assert updated.created_by_id == auth_setup["operator_user"]["id"]
 
     @pytest.mark.asyncio
     @pytest.mark.integration
     async def test_admin_can_clear_folder_owner(
-        self, async_client: AsyncClient, auth_setup, library_folder_factory, db_session
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        library_folder_factory,
+        db_session,
     ):
         folder = await library_folder_factory(
             name="OwnedThenCleared",
             created_by_id=auth_setup["operator_user"]["id"],
         )
         folder_id = folder.id
+
         response = await async_client.patch(
             f"/api/v1/library/folders/{folder_id}/owner",
             json={"created_by_id": None, "recursive": False},
             headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
         )
+
         assert response.status_code == 200
+
         db_session.expire_all()
-        updated = (
-            await db_session.execute(
-                select(LibraryFolder).where(LibraryFolder.id == folder_id)
-            )
-        ).scalar_one()
+        updated = await db_session.get(LibraryFolder, folder_id)
+        assert updated is not None
         assert updated.created_by_id is None
 
     @pytest.mark.asyncio
@@ -1365,74 +1368,78 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
     ):
         parent = await library_folder_factory(name="MixedLegacyParent")
         parent_id = parent.id
-        child = await library_folder_factory(
-            name="MixedLegacyChild",
-            parent_id=parent_id,
-        )
+        child = await library_folder_factory(name="MixedLegacyChild", parent_id=parent_id)
         child_id = child.id
         other_file = await library_file_factory(
             folder_id=child_id,
             created_by_id=auth_setup["operator2_user"]["id"],
         )
         other_file_id = other_file.id
+
         response = await async_client.patch(
             f"/api/v1/library/folders/{parent_id}/owner",
-            json={
-                "created_by_id": auth_setup["operator_user"]["id"],
-                "recursive": True,
-            },
+            json={"created_by_id": auth_setup["operator_user"]["id"], "recursive": True},
             headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
         )
+
         assert response.status_code == 200
         assert response.json()["updated_folders"] == 2
+
         db_session.expire_all()
-        folders = (
-            await db_session.execute(
-                select(LibraryFolder).where(
-                    LibraryFolder.id.in_([parent_id, child_id])
-                )
-            )
-        ).scalars().all()
-        assert {item.created_by_id for item in folders} == {
-            auth_setup["operator_user"]["id"]
-        }
-        file_row = (
-            await db_session.execute(
-                select(LibraryFile).where(LibraryFile.id == other_file_id)
-            )
-        ).scalar_one()
-        assert file_row.created_by_id == auth_setup["operator2_user"]["id"]
+        stored_parent = await db_session.get(LibraryFolder, parent_id)
+        stored_child = await db_session.get(LibraryFolder, child_id)
+        stored_file = await db_session.get(LibraryFile, other_file_id)
+
+        assert stored_parent is not None
+        assert stored_child is not None
+        assert stored_file is not None
+        assert stored_parent.created_by_id == auth_setup["operator_user"]["id"]
+        assert stored_child.created_by_id == auth_setup["operator_user"]["id"]
+        assert stored_file.created_by_id == auth_setup["operator2_user"]["id"]
 
     @pytest.mark.asyncio
     @pytest.mark.integration
     async def test_non_admin_cannot_reassign_folder_owner(
-        self, async_client: AsyncClient, auth_setup, library_folder_factory
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        library_folder_factory,
     ):
         folder = await library_folder_factory(name="AdminManagedFolder")
+
         response = await async_client.patch(
             f"/api/v1/library/folders/{folder.id}/owner",
             json={"created_by_id": auth_setup["operator_user"]["id"]},
             headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
         )
+
         assert response.status_code == 403
 
     @pytest.mark.asyncio
     @pytest.mark.integration
     async def test_admin_owner_assignment_rejects_unknown_user(
-        self, async_client: AsyncClient, auth_setup, library_folder_factory
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        library_folder_factory,
     ):
         folder = await library_folder_factory(name="UnknownOwner")
+
         response = await async_client.patch(
             f"/api/v1/library/folders/{folder.id}/owner",
             json={"created_by_id": 99999999},
             headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
         )
+
         assert response.status_code == 404
 
     @pytest.mark.asyncio
     @pytest.mark.integration
     async def test_admin_cannot_assign_owner_to_external_folder(
-        self, async_client: AsyncClient, auth_setup, library_folder_factory
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        library_folder_factory,
     ):
         folder = await library_folder_factory(
             name="ExternalMount",
@@ -1447,15 +1454,16 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
         )
 
         assert response.status_code == 400
-        assert (
-            response.json()["detail"]
-            == "External folders cannot be assigned to a user"
-        )
+        assert response.json()["detail"] == "External folders cannot be assigned to a user"
 
     @pytest.mark.asyncio
     @pytest.mark.integration
     async def test_admin_owner_change_requires_explicit_owner_field(
-        self, async_client: AsyncClient, auth_setup, library_folder_factory, db_session
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        library_folder_factory,
+        db_session,
     ):
         folder = await library_folder_factory(
             name="ExplicitOwnerRequired",
@@ -1470,12 +1478,10 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
         )
 
         assert response.status_code == 422
+
         db_session.expire_all()
-        stored = (
-            await db_session.execute(
-                select(LibraryFolder).where(LibraryFolder.id == folder_id)
-            )
-        ).scalar_one()
+        stored = await db_session.get(LibraryFolder, folder_id)
+        assert stored is not None
         assert stored.created_by_id == auth_setup["operator_user"]["id"]
 
     # ========================================================================
