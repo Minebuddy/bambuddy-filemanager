@@ -1308,9 +1308,6 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
     async def test_admin_can_assign_folder_owner(
         self, async_client: AsyncClient, auth_setup, library_folder_factory, db_session
     ):
-        from sqlalchemy import select
-        from backend.app.models.library import LibraryFolder
-
         folder = await library_folder_factory(name="LegacyUnassigned")
         response = await async_client.patch(
             f"/api/v1/library/folders/{folder.id}/owner",
@@ -1330,9 +1327,6 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
     async def test_admin_can_clear_folder_owner(
         self, async_client: AsyncClient, auth_setup, library_folder_factory, db_session
     ):
-        from sqlalchemy import select
-        from backend.app.models.library import LibraryFolder
-
         folder = await library_folder_factory(
             name="OwnedThenCleared", created_by_id=auth_setup["operator_user"]["id"]
         )
@@ -1353,9 +1347,6 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
     async def test_admin_recursive_owner_assignment_does_not_change_file_owners(
         self, async_client: AsyncClient, auth_setup, library_folder_factory, library_file_factory, db_session
     ):
-        from sqlalchemy import select
-        from backend.app.models.library import LibraryFile, LibraryFolder
-
         parent = await library_folder_factory(name="MixedLegacyParent")
         child = await library_folder_factory(name="MixedLegacyChild", parent_id=parent.id)
         other_file = await library_file_factory(
