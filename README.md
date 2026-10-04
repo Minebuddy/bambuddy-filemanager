@@ -12,8 +12,7 @@ This is [Minebuddy's fork](https://github.com/Minebuddy/bambuddy-filemanager) of
 ## Docker installation
 
 The fork's Compose file targets `ghcr.io/minebuddy/bambuddy-filemanager:latest`.
-The publishing step is being prepared; this image is not yet verified as available.
-Once published, use:
+The public image is available for `linux/amd64` and `linux/arm64`. Use:
 
 ```bash
 git clone https://github.com/Minebuddy/bambuddy-filemanager.git
@@ -22,7 +21,7 @@ docker compose pull
 docker compose up -d
 ```
 
-Until then, build from source with `docker compose up -d --build`.
+To build from source instead, use `docker compose up -d --build`.
 Open `http://localhost:8000`. The Compose comments explain host networking on
 Linux and port mappings for Docker Desktop or NAS installations. Portainer can
 use the same Compose file; a separate test Dockerfile is no longer needed.
@@ -32,8 +31,8 @@ switching installations. Enable authentication and configure user/group
 permissions to use the access controls. Review unassigned legacy folder owners
 as an administrator.
 
-Update with `docker compose pull && docker compose up -d` after image publication.
-Commit-specific `sha-<full commit>` tags will allow reproducible deployments.
+Update with `docker compose pull && docker compose up -d`.
+Commit-specific `sha-<full commit>` tags are also published for reproducible deployments.
 The fork image uses this repository for update checks.
 
 The original documentation and credits follow. Upstream images do not contain
@@ -718,8 +717,8 @@ cd bambuddy-filemanager && git pull && docker compose up -d --build
 
 **Fork image tags:**
 
-After publication, use `ghcr.io/minebuddy/bambuddy-filemanager:latest`, or a
-published `sha-<full commit>` tag to pin a specific build.
+`ghcr.io/minebuddy/bambuddy-filemanager:latest` is available, along with
+`sha-<full commit>` tags for pinning a specific build.
 
 **Useful Commands:**
 
