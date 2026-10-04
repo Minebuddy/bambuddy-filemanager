@@ -60,6 +60,9 @@ class Permission(StrEnum):
     LIBRARY_UPDATE_ALL = "library:update_all"
     LIBRARY_DELETE_OWN = "library:delete_own"
     LIBRARY_DELETE_ALL = "library:delete_all"
+    # Manage user/group folder shares. This is a global capability gate; the
+    # share API separately requires ownership of the specific folder (or admin).
+    LIBRARY_SHARE = "library:share"
     # Admin-only: bulk purge of old files + trash retention settings (#1008).
     # Routine per-user trash management (restore-own, hard-delete-own) is
     # gated by the existing LIBRARY_DELETE_* permissions instead.
@@ -243,6 +246,7 @@ PERMISSION_CATEGORIES = {
         Permission.LIBRARY_UPDATE_ALL,
         Permission.LIBRARY_DELETE_OWN,
         Permission.LIBRARY_DELETE_ALL,
+        Permission.LIBRARY_SHARE,
         Permission.LIBRARY_PURGE,
     ],
     "Projects": [
@@ -411,6 +415,7 @@ DEFAULT_GROUPS = {
             Permission.LIBRARY_UPLOAD.value,
             Permission.LIBRARY_UPDATE_OWN.value,
             Permission.LIBRARY_DELETE_OWN.value,
+            Permission.LIBRARY_SHARE.value,
             # MakerWorld integration
             Permission.MAKERWORLD_VIEW.value,
             Permission.MAKERWORLD_IMPORT.value,

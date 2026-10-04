@@ -7,8 +7,8 @@ from pydantic import Field
 from pydantic_settings import BaseSettings
 
 # Application version - single source of truth
-APP_VERSION = "1.2.5.7"
-GITHUB_REPO = "maziggy/bambuddy"
+APP_VERSION = "1.2.6b1"
+GITHUB_REPO = os.environ.get("BAMBUDDY_GITHUB_REPO", "maziggy/bambuddy")
 BUG_REPORT_RELAY_URL = os.environ.get("BUG_REPORT_RELAY_URL", "https://bambuddy.cool/api/bug-report")
 
 # App directory - where the application is installed (for static files)

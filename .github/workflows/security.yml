@@ -5,6 +5,7 @@ on:
     # Run weekly on Monday at 6:00 UTC
     - cron: '0 6 * * 1'
   push:
+    branches: [main]
     paths:
       - 'backend/**'
       - 'frontend/**'
@@ -15,6 +16,7 @@ on:
       - 'frontend/package*.json'
       - '.github/workflows/security.yml'
   pull_request:
+    branches: [main]
     paths:
       - 'backend/**'
       - 'frontend/**'

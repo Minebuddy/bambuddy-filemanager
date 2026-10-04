@@ -1,6 +1,7 @@
 """Pydantic schemas for library (File Manager) functionality."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -35,12 +36,96 @@ class FolderUpdate(BaseModel):
     archive_id: int | None = None  # 0 to unlink
 
 
+class FolderOwnerUpdate(BaseModel):
+    """Admin-only folder ownership reassignment."""
+
+    # Required even when the explicit value is null, so an accidental empty
+    # PATCH body can never clear ownership.
+    created_by_id: int | None
+    recursive: bool = False
+
+
+class FolderOwnerUpdateResponse(BaseModel):
+    """Result of an admin folder ownership reassignment."""
+
+    id: int
+    created_by_id: int | None
+    updated_folders: int
+
+
+FolderShareRole = Literal["viewer", "contributor", "manager"]
+FolderSharePrincipalType = Literal["user", "group"]
+
+
+class FolderShareUpsert(BaseModel):
+    """Create or update one direct folder share."""
+
+    principal_type: FolderSharePrincipalType
+    principal_id: int = Field(..., ge=1)
+    role: FolderShareRole
+
+
+class FolderShareResponse(BaseModel):
+    """One direct user/group grant attached to a folder."""
+
+    id: int
+    folder_id: int
+    principal_type: FolderSharePrincipalType
+    principal_id: int
+    principal_name: str
+    role: FolderShareRole
+    created_at: datetime
+
+
+class FolderSharePrincipal(BaseModel):
+    """Minimal principal identity exposed to an authorized folder sharer."""
+
+    id: int
+    name: str
+
+
+class FolderSharePrincipalsResponse(BaseModel):
+    """Users and groups available to an authorized folder sharer."""
+
+    users: list[FolderSharePrincipal]
+    groups: list[FolderSharePrincipal]
+
+
+class FolderAccessOverviewShare(BaseModel):
+    """A direct grant shown in the admin library access overview."""
+
+    source_folder_id: int
+    source_folder_name: str
+    principal_type: FolderSharePrincipalType
+    principal_id: int
+    principal_name: str
+    role: FolderShareRole
+
+
+class FolderAccessOverviewItem(BaseModel):
+    """One unassigned or ambiguous internal folder for admin review."""
+
+    id: int
+    name: str
+    path: str
+    parent_id: int | None
+    created_by_id: int | None
+    owner_name: str | None
+    file_count: int
+    distinct_file_owners: int
+    ownerless_file_count: int
+    is_ambiguous: bool
+    direct_shares: list[FolderAccessOverviewShare]
+    inherited_shares: list[FolderAccessOverviewShare]
+
+
 class FolderResponse(BaseModel):
     """Schema for folder response."""
 
     id: int
     name: str
     parent_id: int | None
+    created_by_id: int | None = None
     project_id: int | None = None
     archive_id: int | None = None
     project_name: str | None = None
@@ -82,6 +167,7 @@ class FolderTreeItem(BaseModel):
     id: int
     name: str
     parent_id: int | None
+    created_by_id: int | None = None
     project_id: int | None = None
     archive_id: int | None = None
     project_name: str | None = None
@@ -90,6 +176,8 @@ class FolderTreeItem(BaseModel):
     external_path: str | None = None
     external_readonly: bool = False
     file_count: int = 0
+    access_role: FolderShareRole | None = None
+    navigation_only: bool = False
     # See FolderResponse.latest_activity_at — #1770 folder sort source.
     latest_activity_at: datetime | None = None
     children: list["FolderTreeItem"] = []
@@ -220,6 +308,7 @@ class FileListResponse(BaseModel):
     thumbnail_path: str | None
     print_count: int
     duplicate_count: int = 0
+    access_role: FolderShareRole | None = None
     # User tracking (Issue #206)
     created_by_id: int | None = None
     created_by_username: str | None = None

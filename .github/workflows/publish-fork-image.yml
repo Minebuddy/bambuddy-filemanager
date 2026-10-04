@@ -1,0 +1,64 @@
+name: Publish fork Docker image
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-docker-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'Minebuddy/bambuddy-filemanager' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - name: Confirm this is still the main branch head
+        id: current
+        env:
+          BUILD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          main_sha=$(git ls-remote origin refs/heads/main | cut -f1)
+          if [ "$BUILD_SHA" = "$main_sha" ]; then
+            echo 'publish=true' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/setup-qemu-action@v3
+        if: steps.current.outputs.publish == 'true'
+      - uses: docker/setup-buildx-action@v3
+        if: steps.current.outputs.publish == 'true'
+      - name: Sign in to GitHub Container Registry
+        if: steps.current.outputs.publish == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish
+        if: steps.current.outputs.publish == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: BAMBUDDY_BUILD_BRANCH=main
+          tags: |
+            ghcr.io/minebuddy/bambuddy-filemanager:latest
+            ghcr.io/minebuddy/bambuddy-filemanager:sha-${{ github.event.workflow_run.head_sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/Minebuddy/bambuddy-filemanager
+            org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha }}
+            org.opencontainers.image.licenses=AGPL-3.0
+          cache-from: type=gha,scope=fork-production
+          cache-to: type=gha,scope=fork-production,mode=max

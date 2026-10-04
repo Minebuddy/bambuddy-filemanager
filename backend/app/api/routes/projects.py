@@ -2007,7 +2007,7 @@ async def export_project(
 async def import_project(
     data: ProjectImport,
     db: AsyncSession = Depends(get_db),
-    _: User | None = RequirePermissionIfAuthEnabled(Permission.PROJECTS_CREATE),
+    current_user: User | None = RequirePermissionIfAuthEnabled(Permission.PROJECTS_CREATE),
 ):
     """Import a project with optional BOM items and linked folders."""
     # Create the project
@@ -2046,12 +2046,13 @@ async def import_project(
     # Create linked folders in library
     for folder_data in data.linked_folders:
         # Check if folder with this name already exists at root level
-        existing_result = await db.execute(
-            select(LibraryFolder).where(
-                LibraryFolder.name == folder_data.name,
-                LibraryFolder.parent_id.is_(None),
-            )
+        folder_query = select(LibraryFolder).where(
+            LibraryFolder.name == folder_data.name,
+            LibraryFolder.parent_id.is_(None),
         )
+        if current_user is not None:
+            folder_query = folder_query.where(LibraryFolder.created_by_id == current_user.id)
+        existing_result = await db.execute(folder_query)
         existing_folder = existing_result.scalar_one_or_none()
 
         if existing_folder:
@@ -2065,6 +2066,7 @@ async def import_project(
                 is_external=False,
                 external_readonly=False,
                 external_show_hidden=False,
+                created_by_id=current_user.id if current_user else None,
             )
             db.add(new_folder)
 
@@ -2105,7 +2107,7 @@ async def import_project(
 async def import_project_file(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    _: User | None = RequirePermissionIfAuthEnabled(Permission.PROJECTS_CREATE),
+    current_user: User | None = RequirePermissionIfAuthEnabled(Permission.PROJECTS_CREATE),
 ):
     """Import a project from a ZIP or JSON file."""
     if not file.filename:
@@ -2185,12 +2187,13 @@ async def import_project_file(
         folder_path = safe_join_under(library_dir, folder_name)
 
         # Check if folder exists
-        existing_result = await db.execute(
-            select(LibraryFolder).where(
-                LibraryFolder.name == folder_name,
-                LibraryFolder.parent_id.is_(None),
-            )
+        folder_query = select(LibraryFolder).where(
+            LibraryFolder.name == folder_name,
+            LibraryFolder.parent_id.is_(None),
         )
+        if current_user is not None:
+            folder_query = folder_query.where(LibraryFolder.created_by_id == current_user.id)
+        existing_result = await db.execute(folder_query)
         existing_folder = existing_result.scalar_one_or_none()
 
         if existing_folder:
@@ -2205,6 +2208,7 @@ async def import_project_file(
                 is_external=False,
                 external_readonly=False,
                 external_show_hidden=False,
+                created_by_id=current_user.id if current_user else None,
             )
             db.add(folder)
             await db.flush()
@@ -2258,6 +2262,7 @@ async def import_project_file(
                 file_type=file_type,
                 file_size=len(file_content),
                 is_external=False,
+                created_by_id=current_user.id if current_user else None,
             )
             db.add(lib_file)
 

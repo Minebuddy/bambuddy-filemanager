@@ -141,6 +141,9 @@ class TestApiKeyDenylistIntegrity:
             Permission.GITHUB_BACKUP,
             Permission.GITHUB_RESTORE,
             Permission.FIRMWARE_UPDATE,
+            # Folder sharing grants access to library data and remains
+            # unavailable to API keys.
+            Permission.LIBRARY_SHARE,
         }
         missing = expected_denied - _APIKEY_DENIED_PERMISSIONS
         assert not missing, (

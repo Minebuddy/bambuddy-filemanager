@@ -3,6 +3,7 @@ import { Loader2, Plus, Plug, AlertTriangle, RotateCcw, Bell, Download, RefreshC
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
+import { LibraryAccessSettings } from '../components/LibraryAccessSettings';
 import { useAuth } from '../contexts/AuthContext';
 import { formatDateOnly } from '../utils/date';
 import { getCurrencySymbol, SUPPORTED_CURRENCIES } from '../utils/currency';
@@ -66,7 +67,7 @@ import type { UsersSubTab } from '../lib/settingsSearch';
 import { availableEngines, hasEngineChoice, resolveEngine, type SliceEngineId } from '../lib/sliceEngines';
 import { NumberInput } from '../components/NumberInput';
 
-const validTabs = ['general', 'plugs', 'sensors', 'notifications', 'queue', 'filament', 'network', 'apikeys', 'virtual-printer', 'spoolbuddy', 'failure-detection', 'users', 'backup'] as const;
+const validTabs = ['general', 'plugs', 'sensors', 'notifications', 'queue', 'filament', 'network', 'apikeys', 'virtual-printer', 'spoolbuddy', 'failure-detection', 'users', 'library-access', 'backup'] as const;
 type TabType = typeof validTabs[number];
 
 // Cross-tab search registrations for cards rendered inline in this file.
@@ -1772,7 +1773,9 @@ export function SettingsPage() {
           {t('settings.tabs.backup')}
           <span className={`w-2 h-2 rounded-full shrink-0 ${(cloudAuthStatus?.is_authenticated && githubBackupStatus?.configured && githubBackupStatus?.enabled) || settings?.local_backup_enabled ? 'bg-green-400' : 'bg-gray-500'}`} />
         </button>
+        {(!authEnabled || hasPermission('library:share')) && <button onClick={() => handleTabChange('library-access')} className={`px-4 py-2 text-sm font-medium flex items-center gap-2 ${activeTab === 'library-access' ? 'text-bambu-green' : 'text-bambu-gray'}`}><Lock className="w-4 h-4" />Library access</button>}
       </nav>
+      {activeTab === 'library-access' && (!authEnabled || hasPermission('library:share')) && <LibraryAccessSettings />}
       <div className="flex-1 min-w-0">
       {activeTab === 'general' && (
       <>

@@ -1,11 +1,29 @@
 """Library models for file manager functionality."""
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, Select, String, Text, func, select
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Select,
+    String,
+    Text,
+    UniqueConstraint,
+    false,
+    func,
+    select,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.core.database import Base
+
+if TYPE_CHECKING:
+    from backend.app.models.group import Group
 
 
 class LibraryFolder(Base):
@@ -16,6 +34,16 @@ class LibraryFolder(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
     parent_id: Mapped[int | None] = mapped_column(ForeignKey("library_folders.id", ondelete="CASCADE"), nullable=True)
+
+    # User tracking (#3201). Folder ownership mirrors LibraryFile ownership so
+    # library:read_own can scope the folder tree as well as the files inside it.
+    # NULL is reserved for legacy/system-created folders and requires read_all.
+    created_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+    # Explicit admin ownership decisions must survive the legacy backfill on restart.
+    ownership_reviewed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     # External folder flags (for folders that point to external paths)
     is_external: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -80,6 +108,102 @@ class LibraryFolder(Base):
     )
     project: Mapped["Project | None"] = relationship()
     archive: Mapped["PrintArchive | None"] = relationship()
+    created_by: Mapped["User | None"] = relationship()
+    shares: Mapped[list["LibraryFolderShare"]] = relationship(
+        back_populates="folder",
+        cascade="all, delete-orphan",
+    )
+
+
+class LibraryFolderShare(Base):
+    """User/group access grant on a library folder."""
+
+    __tablename__ = "library_folder_shares"
+    __table_args__ = (
+        CheckConstraint(
+            "(user_id IS NOT NULL AND group_id IS NULL) OR (user_id IS NULL AND group_id IS NOT NULL)",
+            name="ck_library_folder_shares_one_principal",
+        ),
+        CheckConstraint(
+            "role IN ('viewer', 'contributor', 'manager')",
+            name="ck_library_folder_shares_role",
+        ),
+        UniqueConstraint("folder_id", "user_id", name="uq_library_folder_share_user"),
+        UniqueConstraint("folder_id", "group_id", name="uq_library_folder_share_group"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    folder_id: Mapped[int] = mapped_column(
+        ForeignKey("library_folders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    group_id: Mapped[int | None] = mapped_column(
+        ForeignKey("groups.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    folder: Mapped["LibraryFolder"] = relationship(back_populates="shares")
+    user: Mapped["User | None"] = relationship(foreign_keys=[user_id])
+    group: Mapped["Group | None"] = relationship(foreign_keys=[group_id])
+    created_by: Mapped["User | None"] = relationship(foreign_keys=[created_by_id])
+
+
+class LibraryFileShare(Base):
+    """User/group access grant on a library file."""
+
+    __tablename__ = "library_file_shares"
+    __table_args__ = (
+        CheckConstraint(
+            "(user_id IS NOT NULL AND group_id IS NULL) OR (user_id IS NULL AND group_id IS NOT NULL)",
+            name="ck_library_file_shares_one_principal",
+        ),
+        CheckConstraint(
+            "role IN ('viewer', 'contributor', 'manager')",
+            name="ck_library_file_shares_role",
+        ),
+        UniqueConstraint("file_id", "user_id", name="uq_library_file_share_user"),
+        UniqueConstraint("file_id", "group_id", name="uq_library_file_share_group"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    file_id: Mapped[int] = mapped_column(
+        ForeignKey("library_files.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    group_id: Mapped[int | None] = mapped_column(
+        ForeignKey("groups.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    user: Mapped["User | None"] = relationship(foreign_keys=[user_id])
+    group: Mapped["Group | None"] = relationship(foreign_keys=[group_id])
+    created_by: Mapped["User | None"] = relationship(foreign_keys=[created_by_id])
 
 
 class FileVariantGroup(Base):
