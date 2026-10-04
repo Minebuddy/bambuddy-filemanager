@@ -30,9 +30,11 @@ meaning rather than shape:
 * **A file belongs to at most one group**, which the schema already guarantees;
   this layer turns the resulting overwrite into an explicit 409.
 
-Permissions follow library_tags.py: mutations need LIBRARY_UPDATE_ALL /
-LIBRARY_UPDATE_OWN, reads need LIBRARY_READ_ALL / LIBRARY_READ_OWN, and an
-``*_OWN`` caller only ever sees or touches files they created.
+Permissions use the normal library capability gate plus contextual folder access.
+Reads accept owned files or Viewer-or-better shared access; mutations accept
+owned files or Manager shared access. Group-level routes authorize every member
+before returning or changing the group, so a raw group id cannot expose a hidden
+variant.
 """
 
 from __future__ import annotations
@@ -55,6 +57,7 @@ from backend.app.schemas.library import (
     VariantGroupResponse,
     VariantGroupUpdate,
 )
+from backend.app.services.library_access import file_access_roles, role_allows
 from backend.app.utils.printer_models import normalize_printer_model, normalize_printer_model_id
 
 logger = logging.getLogger(__name__)
@@ -99,13 +102,54 @@ async def _load_files(
     file_ids: list[int],
     user: User | None,
     can_access_all: bool,
+    required_role: str = "viewer",
 ) -> dict[int, LibraryFile]:
-    """Fetch the caller's visible, untrashed files by id."""
-    query = LibraryFile.active().where(LibraryFile.id.in_(file_ids))
-    if user is not None and not can_access_all:
-        query = query.where(LibraryFile.created_by_id == user.id)
-    rows = (await db.execute(query)).scalars().all()
-    return {f.id: f for f in rows}
+    """Fetch files visible/manageable in the caller's contextual library scope."""
+
+    rows = (await db.execute(LibraryFile.active().where(LibraryFile.id.in_(file_ids)))).scalars().all()
+    if can_access_all:
+        return {f.id: f for f in rows}
+    if user is None:
+        return {}
+
+    roles = await file_access_roles(db, user)
+    allowed: dict[int, LibraryFile] = {}
+    for lib_file in rows:
+        if lib_file.created_by_id == user.id:
+            allowed[lib_file.id] = lib_file
+            continue
+        if role_allows(roles.get(lib_file.id), required_role):
+            allowed[lib_file.id] = lib_file
+    return allowed
+
+
+async def _authorize_group_members(
+    db: AsyncSession,
+    group: FileVariantGroup,
+    user: User | None,
+    can_access_all: bool,
+    required_role: str,
+) -> list[LibraryFile]:
+    """Return all active group members only when the caller may access all."""
+
+    members = (await db.execute(LibraryFile.active().where(LibraryFile.variant_group_id == group.id))).scalars().all()
+    if can_access_all:
+        return members
+    if not members:
+        if user is not None and group.created_by_id == user.id:
+            return []
+        raise HTTPException(404, "Variant group not found")
+
+    allowed = await _load_files(
+        db,
+        [member.id for member in members],
+        user,
+        can_access_all,
+        required_role,
+    )
+    if len(allowed) != len(members):
+        raise HTTPException(404, "Variant group not found")
+    return members
 
 
 def _validate_member(lib_file: LibraryFile, explicit_model: str | None) -> str:
@@ -201,7 +245,7 @@ async def create_variant_group(
     if len(set(file_ids)) != len(file_ids):
         raise HTTPException(400, "The same file cannot appear twice in a variant group")
 
-    files = await _load_files(db, file_ids, user, can_update_all)
+    files = await _load_files(db, file_ids, user, can_update_all, "manager")
     missing = [fid for fid in file_ids if fid not in files]
     if missing:
         raise HTTPException(404, f"Library file not found: {missing[0]}")
@@ -262,7 +306,9 @@ async def get_group_for_file(
         raise HTTPException(404, "Library file not found")
     if lib_file.variant_group_id is None:
         raise HTTPException(404, "File is not part of a variant group")
-    return await _group_response(db, await _get_group_or_404(db, lib_file.variant_group_id))
+    group = await _get_group_or_404(db, lib_file.variant_group_id)
+    await _authorize_group_members(db, group, user, can_read_all, "viewer")
+    return await _group_response(db, group)
 
 
 @router.get("/{group_id}", response_model=VariantGroupResponse)
@@ -276,7 +322,10 @@ async def get_variant_group(
         )
     ),
 ) -> VariantGroupResponse:
-    return await _group_response(db, await _get_group_or_404(db, group_id))
+    user, can_read_all = auth_result
+    group = await _get_group_or_404(db, group_id)
+    await _authorize_group_members(db, group, user, can_read_all, "viewer")
+    return await _group_response(db, group)
 
 
 @router.patch("/{group_id}", response_model=VariantGroupResponse)
@@ -299,6 +348,7 @@ async def update_variant_group(
     """
     user, can_update_all = auth_result
     group = await _get_group_or_404(db, group_id)
+    await _authorize_group_members(db, group, user, can_update_all, "manager")
 
     if payload.name is not None:
         group.name = payload.name
@@ -309,7 +359,13 @@ async def update_variant_group(
         )
         if set(payload.member_file_ids) != {f.id for f in current}:
             raise HTTPException(400, "member_file_ids must list exactly the group's current members")
-        files = await _load_files(db, payload.member_file_ids, user, can_update_all)
+        files = await _load_files(
+            db,
+            payload.member_file_ids,
+            user,
+            can_update_all,
+            "manager",
+        )
         if len(files) != len(payload.member_file_ids):
             raise HTTPException(404, "Library file not found")
         for position, fid in enumerate(payload.member_file_ids):
@@ -338,8 +394,15 @@ async def add_variant_group_member(
     """
     user, can_update_all = auth_result
     group = await _get_group_or_404(db, group_id)
+    await _authorize_group_members(db, group, user, can_update_all, "manager")
 
-    files = await _load_files(db, [payload.library_file_id], user, can_update_all)
+    files = await _load_files(
+        db,
+        [payload.library_file_id],
+        user,
+        can_update_all,
+        "manager",
+    )
     lib_file = files.get(payload.library_file_id)
     if not lib_file:
         raise HTTPException(404, "Library file not found")
@@ -390,8 +453,9 @@ async def remove_variant_group_member(
     """Drop one file out of a group; the file itself is untouched."""
     user, can_update_all = auth_result
     group = await _get_group_or_404(db, group_id)
+    await _authorize_group_members(db, group, user, can_update_all, "manager")
 
-    files = await _load_files(db, [file_id], user, can_update_all)
+    files = await _load_files(db, [file_id], user, can_update_all, "manager")
     lib_file = files.get(file_id)
     if not lib_file or lib_file.variant_group_id != group.id:
         raise HTTPException(404, "File is not a member of this group")
@@ -416,8 +480,9 @@ async def delete_variant_group(
 ) -> None:
     """Ungroup the files. The files themselves are kept — every one of them is
     independently printable, which is the whole reason they were grouped."""
+    user, can_update_all = auth_result
     group = await _get_group_or_404(db, group_id)
-    members = (await db.execute(select(LibraryFile).where(LibraryFile.variant_group_id == group.id))).scalars().all()
+    members = await _authorize_group_members(db, group, user, can_update_all, "manager")
     for lib_file in members:
         lib_file.variant_group_id = None
         lib_file.variant_position = 0

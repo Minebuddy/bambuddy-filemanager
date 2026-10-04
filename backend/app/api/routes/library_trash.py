@@ -8,7 +8,8 @@ Permission model:
 * **Per-user trash** (list / restore / hard-delete / empty own trash) is
   gated by the existing :attr:`Permission.LIBRARY_DELETE_ALL` /
   :attr:`Permission.LIBRARY_DELETE_OWN` ownership pair, so a regular user
-  sees their own trashed files and an admin sees everyone's.
+  sees their own trashed files and files explicitly shared with manager access. An admin
+  sees everyone's. Empty-trash remains limited to the caller's own files.
 """
 
 from __future__ import annotations
@@ -17,10 +18,13 @@ import logging
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.core.auth import require_ownership_permission, require_permission_if_auth_enabled
+from backend.app.core.auth import (
+    require_ownership_permission,
+    require_permission_if_auth_enabled,
+)
 from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
 from backend.app.models.library import LibraryFile, LibraryFolder
@@ -33,6 +37,12 @@ from backend.app.schemas.library_trash import (
     TrashFile,
     TrashListResponse,
     TrashSettings,
+)
+from backend.app.services.library_access import (
+    effective_file_role,
+    effective_folder_role,
+    file_access_roles,
+    role_allows,
 )
 from backend.app.services.library_trash import (
     MAX_RETENTION_DAYS,
@@ -100,7 +110,7 @@ async def list_trash(
     """List trashed files.
 
     Admins (``LIBRARY_DELETE_ALL``) see every user's trash; regular users
-    (``LIBRARY_DELETE_OWN``) see only rows they created.
+    (``LIBRARY_DELETE_OWN``) see rows they created or manage via folder grants.
     """
     user, can_modify_all = auth_result
     retention_days = await library_trash_service.get_retention_days(db)
@@ -112,7 +122,8 @@ async def list_trash(
             # Defensive: ownership checker only returns user=None when auth is off,
             # in which case can_modify_all=True. If we somehow land here, err safe.
             raise HTTPException(status_code=403, detail="Authentication required")
-        base_conditions.append(LibraryFile.created_by_id == user.id)
+        manager_ids = [fid for fid, role in (await file_access_roles(db, user)).items() if role_allows(role, "manager")]
+        base_conditions.append(or_(LibraryFile.created_by_id == user.id, LibraryFile.id.in_(manager_ids)))
 
     total_result = await db.execute(select(func.count(LibraryFile.id)).where(*base_conditions))
     total = int(total_result.scalar() or 0)
@@ -156,7 +167,7 @@ async def _load_trashed_file(
     user: User | None,
     can_modify_all: bool,
 ) -> LibraryFile:
-    """Fetch a trashed file, enforcing ownership for non-admins."""
+    """Fetch a trashed file the caller owns or manages through its folder."""
     result = await db.execute(
         select(LibraryFile).where(
             LibraryFile.id == file_id,
@@ -167,8 +178,9 @@ async def _load_trashed_file(
     if file is None:
         raise HTTPException(status_code=404, detail="Trashed file not found")
     if not can_modify_all:
-        if user is None or file.created_by_id != user.id:
-            raise HTTPException(status_code=403, detail="You can only manage your own trashed files")
+        role = await effective_file_role(db, file.id, user) if user else None
+        if user is None or (file.created_by_id != user.id and not role_allows(role, "manager")):
+            raise HTTPException(status_code=403, detail="Ownership or manager access is required for this trashed file")
     return file
 
 
@@ -185,6 +197,10 @@ async def restore_from_trash(
 ):
     user, can_modify_all = auth_result
     file = await _load_trashed_file(db, file_id, user, can_modify_all)
+    if file.folder_id is not None and not can_modify_all:
+        role = await effective_folder_role(db, file.folder_id, user) if user else None
+        if not role_allows(role, "contributor"):
+            raise HTTPException(403, "Contributor access to the destination folder is required to restore this file")
     await library_trash_service.restore(db, file)
     return {"status": "success", "id": file.id}
 

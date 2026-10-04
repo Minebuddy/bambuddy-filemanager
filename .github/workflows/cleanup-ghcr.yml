@@ -27,11 +27,12 @@ permissions: {}
 
 jobs:
   cleanup:
+    if: github.repository == 'Minebuddy/bambuddy-filemanager'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        package: [bambuddy]
+        package: [bambuddy-filemanager]
     steps:
       - name: Cleanup ${{ matrix.package }}
         env:
@@ -41,6 +42,10 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "GHCR_CLEANUP_TOKEN is not configured; skipping optional cleanup."
+            exit 0
+          fi
 
           # 1. Fetch all versions for the package.
           gh api "users/${OWNER}/packages/container/${PACKAGE}/versions?per_page=100" \

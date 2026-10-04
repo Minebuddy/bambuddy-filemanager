@@ -1,8 +1,8 @@
 /**
  * Tests for folder deletion permission gating in the File Manager tree (#1781).
  *
- * Users with only library:delete_own may delete empty, unlinked, non-external
- * folders; everything else stays behind library:delete_all.
+ * Users with library:delete_own and manager access may delete internal,
+ * unlinked folders, including shared contents. The API checks the subtree.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -19,24 +19,28 @@ const mockFolders = [
     id: 1,
     name: 'EmptyOne',
     parent_id: null,
+    created_by_id: 7,
     file_count: 0,
     project_id: null,
     archive_id: null,
     project_name: null,
     archive_name: null,
     is_external: false,
+    access_role: 'manager',
     children: [],
   },
   {
     id: 2,
     name: 'HasFiles',
     parent_id: null,
+    created_by_id: 7,
     file_count: 3,
     project_id: null,
     archive_id: null,
     project_name: null,
     archive_name: null,
     is_external: false,
+    access_role: 'manager',
     children: [],
   },
   {
@@ -116,7 +120,7 @@ describe('FileManager folder deletion gating (#1781)', () => {
     expect(deleteButton).not.toBeDisabled();
   });
 
-  it('disables delete on a non-empty folder for a delete_own user, with empty-only tooltip', async () => {
+  it('enables delete on a non-empty folder for a manager with delete_own', async () => {
     mockAuthUser(['library:read_own', 'library:delete_own']);
     render(<FileManagerPage />);
     await waitFor(() => expect(screen.getByText('HasFiles')).toBeInTheDocument());
@@ -124,8 +128,7 @@ describe('FileManager folder deletion gating (#1781)', () => {
     const user = userEvent.setup();
     const row = await openFolderMenu(user, 'HasFiles');
     const deleteButton = within(row).getByRole('button', { name: 'Delete' });
-    expect(deleteButton).toBeDisabled();
-    expect(deleteButton).toHaveAttribute('title', 'You can only delete empty folders');
+    expect(deleteButton).not.toBeDisabled();
   });
 
   it('disables delete on a linked folder for a delete_own user, with no-permission tooltip', async () => {
@@ -150,6 +153,28 @@ describe('FileManager folder deletion gating (#1781)', () => {
     const deleteButton = within(row).getByRole('button', { name: 'Delete' });
     expect(deleteButton).toBeDisabled();
     expect(deleteButton).toHaveAttribute('title', 'You do not have permission to delete folders');
+  });
+
+  it('enables delete for a manager of another user’s folder', async () => {
+    mockAuthUser(['library:read_own', 'library:delete_own']);
+    server.use(http.get('/api/v1/library/folders', () =>
+      HttpResponse.json([{ ...mockFolders[1], created_by_id: 99 }]),
+    ));
+    render(<FileManagerPage />);
+    await waitFor(() => expect(screen.getByText('HasFiles')).toBeInTheDocument());
+    const row = await openFolderMenu(userEvent.setup(), 'HasFiles');
+    expect(within(row).getByRole('button', { name: 'Delete' })).not.toBeDisabled();
+  });
+
+  it('keeps delete disabled for a viewer despite delete_own permission', async () => {
+    mockAuthUser(['library:read_own', 'library:delete_own']);
+    server.use(http.get('/api/v1/library/folders', () =>
+      HttpResponse.json([{ ...mockFolders[1], created_by_id: 99, access_role: 'viewer' }]),
+    ));
+    render(<FileManagerPage />);
+    await waitFor(() => expect(screen.getByText('HasFiles')).toBeInTheDocument());
+    const row = await openFolderMenu(userEvent.setup(), 'HasFiles');
+    expect(within(row).getByRole('button', { name: 'Delete' })).toBeDisabled();
   });
 
   it('keeps delete enabled on non-empty folders for a delete_all user', async () => {

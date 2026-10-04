@@ -1810,6 +1810,147 @@ async def _migrate_failure_reason_vocabulary(conn):
         logger.info("[#2974] converted %d failure_reason value(s) to the canonical vocabulary", total)
 
 
+async def _migrate_library_folder_owners(conn) -> int:
+    """Infer legacy folder owners from the files contained in each subtree.
+
+    Folder ownership was added after file ownership. Upgraded/restored
+    databases therefore have library_folders.created_by_id = NULL even when
+    every file beneath a folder already belongs to the same user.
+
+    Backfill only when the evidence is unambiguous:
+      * the folder is not an external/system mount;
+      * the subtree contains at least one file;
+      * every file in the subtree has a non-null owner; and
+      * all files in the subtree have the same owner.
+
+    Mixed-owner, ownerless-file and empty legacy folders stay NULL. Existing
+    folder ownership is never overwritten. The operation is idempotent.
+    """
+    from collections import defaultdict, deque
+
+    from sqlalchemy import text
+
+    folder_rows = (
+        await conn.execute(
+            text("SELECT id, parent_id, is_external, created_by_id, ownership_reviewed FROM library_folders")
+        )
+    ).fetchall()
+    if not folder_rows:
+        return 0
+
+    file_rows = (
+        await conn.execute(text("SELECT folder_id, created_by_id FROM library_files WHERE folder_id IS NOT NULL"))
+    ).fetchall()
+
+    children: dict[int, list[int]] = defaultdict(list)
+    folder_state: dict[int, tuple[int | None, bool, int | None]] = {}
+    reviewed_ids: set[int] = set()
+    for folder_id, parent_id, is_external, created_by_id, ownership_reviewed in folder_rows:
+        if ownership_reviewed:
+            reviewed_ids.add(int(folder_id))
+        fid = int(folder_id)
+        folder_state[fid] = (
+            int(parent_id) if parent_id is not None else None,
+            bool(is_external),
+            int(created_by_id) if created_by_id is not None else None,
+        )
+        if parent_id is not None:
+            children[int(parent_id)].append(fid)
+
+    direct_owners: dict[int, set[int]] = defaultdict(set)
+    has_ownerless_file: set[int] = set()
+    has_any_file: set[int] = set()
+
+    for folder_id, created_by_id in file_rows:
+        fid = int(folder_id)
+        has_any_file.add(fid)
+        if created_by_id is None:
+            has_ownerless_file.add(fid)
+        else:
+            direct_owners[fid].add(int(created_by_id))
+
+    # Fold evidence from leaves toward parents. Nodes remaining after the
+    # queue drains are cyclic and must never be used to infer ownership.
+    memo = {
+        fid: (set(direct_owners.get(fid, set())), fid in has_ownerless_file, fid in has_any_file)
+        for fid in folder_state
+    }
+    pending_children = {fid: len(children.get(fid, [])) for fid in folder_state}
+    ready = deque(fid for fid, count in pending_children.items() if count == 0)
+    processed: set[int] = set()
+    while ready:
+        fid = ready.popleft()
+        processed.add(fid)
+        parent_id = folder_state[fid][0]
+        if parent_id not in folder_state:
+            continue
+        owners, ownerless, has_file = memo[fid]
+        parent_owners, parent_ownerless, parent_has_file = memo[parent_id]
+        parent_owners.update(owners)
+        memo[parent_id] = (parent_owners, parent_ownerless or ownerless, parent_has_file or has_file)
+        pending_children[parent_id] -= 1
+        if pending_children[parent_id] == 0:
+            ready.append(parent_id)
+    cycle_nodes = set(folder_state) - processed
+
+    updates: list[dict[str, int]] = []
+    for folder_id, (_parent_id, is_external, created_by_id) in folder_state.items():
+        if created_by_id is not None or is_external or folder_id in reviewed_ids or folder_id in cycle_nodes:
+            continue
+        owners, ownerless, has_file = memo[folder_id]
+        if has_file and not ownerless and len(owners) == 1:
+            updates.append({"folder_id": folder_id, "owner_id": next(iter(owners))})
+
+    if updates:
+        await conn.execute(
+            text(
+                "UPDATE library_folders SET created_by_id = :owner_id WHERE id = :folder_id AND created_by_id IS NULL"
+            ),
+            updates,
+        )
+        logger.info(
+            "Backfilled ownership for %d legacy library folder(s) from file ownership",
+            len(updates),
+        )
+
+    if cycle_nodes:
+        logger.warning(
+            "Skipped ownership inference for malformed cyclic library folder relationships: %s",
+            sorted(cycle_nodes),
+        )
+
+    return len(updates)
+
+
+async def _migrate_library_ownership_schema(conn) -> int:
+    """Add ownership columns in dependency order before inferring folder owners."""
+    # File ownership predates folder ownership, but restored databases may
+    # still lack it. Add it before the folder backfill reads the column.
+    await _safe_execute(
+        conn,
+        "ALTER TABLE library_files ADD COLUMN created_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL",
+    )
+
+    # Migration: add ownership tracking to library folders (#3201). Fresh
+    # installs get this from the ORM model; upgraded installs need the nullable
+    # FK added in place. A conservative data backfill below recovers ownership
+    # only when every file in a legacy folder subtree points to one same user.
+    await _safe_execute(
+        conn,
+        "ALTER TABLE library_folders ADD COLUMN created_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL",
+    )
+    await _safe_execute(
+        conn,
+        "CREATE INDEX IF NOT EXISTS ix_library_folders_created_by_id ON library_folders (created_by_id)",
+    )
+
+    await _safe_execute(
+        conn,
+        "ALTER TABLE library_folders ADD COLUMN ownership_reviewed BOOLEAN NOT NULL DEFAULT FALSE",
+    )
+    return await _migrate_library_folder_owners(conn)
+
+
 async def run_migrations(conn):
     """Run all schema migrations and data backfills on startup.
 
@@ -1823,6 +1964,126 @@ async def run_migrations(conn):
     swallowed.
     """
     from sqlalchemy import text
+
+    await _migrate_library_ownership_schema(conn)
+
+    # Folder sharing/access grants. Existing installs have no shares, so this
+    # is purely additive and preserves all ownership data.
+    await _safe_execute(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS library_folder_shares (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            folder_id INTEGER NOT NULL REFERENCES library_folders(id) ON DELETE CASCADE,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE,
+            role VARCHAR(20) NOT NULL,
+            created_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT ck_library_folder_shares_one_principal CHECK (
+                (user_id IS NOT NULL AND group_id IS NULL)
+                OR (user_id IS NULL AND group_id IS NOT NULL)
+            ),
+            CONSTRAINT ck_library_folder_shares_role CHECK (
+                role IN ('viewer', 'contributor', 'manager')
+            ),
+            CONSTRAINT uq_library_folder_share_user UNIQUE (folder_id, user_id),
+            CONSTRAINT uq_library_folder_share_group UNIQUE (folder_id, group_id)
+        )
+        """
+        if is_sqlite()
+        else """
+        CREATE TABLE IF NOT EXISTS library_folder_shares (
+            id SERIAL PRIMARY KEY,
+            folder_id INTEGER NOT NULL REFERENCES library_folders(id) ON DELETE CASCADE,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE,
+            role VARCHAR(20) NOT NULL,
+            created_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT ck_library_folder_shares_one_principal CHECK (
+                (user_id IS NOT NULL AND group_id IS NULL)
+                OR (user_id IS NULL AND group_id IS NOT NULL)
+            ),
+            CONSTRAINT ck_library_folder_shares_role CHECK (
+                role IN ('viewer', 'contributor', 'manager')
+            ),
+            CONSTRAINT uq_library_folder_share_user UNIQUE (folder_id, user_id),
+            CONSTRAINT uq_library_folder_share_group UNIQUE (folder_id, group_id)
+        )
+        """,
+    )
+    await _safe_execute(
+        conn,
+        "CREATE INDEX IF NOT EXISTS ix_library_folder_shares_folder_id ON library_folder_shares (folder_id)",
+    )
+    await _safe_execute(
+        conn,
+        "CREATE INDEX IF NOT EXISTS ix_library_folder_shares_user_id ON library_folder_shares (user_id)",
+    )
+    await _safe_execute(
+        conn,
+        "CREATE INDEX IF NOT EXISTS ix_library_folder_shares_group_id ON library_folder_shares (group_id)",
+    )
+
+    # File sharing/access grants. Existing installs have no shares, so this
+    # is purely additive and preserves all ownership data.
+    await _safe_execute(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS library_file_shares (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_id INTEGER NOT NULL REFERENCES library_files(id) ON DELETE CASCADE,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE,
+            role VARCHAR(20) NOT NULL,
+            created_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT ck_library_file_shares_one_principal CHECK (
+                (user_id IS NOT NULL AND group_id IS NULL)
+                OR (user_id IS NULL AND group_id IS NOT NULL)
+            ),
+            CONSTRAINT ck_library_file_shares_role CHECK (
+                role IN ('viewer', 'contributor', 'manager')
+            ),
+            CONSTRAINT uq_library_file_share_user UNIQUE (file_id, user_id),
+            CONSTRAINT uq_library_file_share_group UNIQUE (file_id, group_id)
+        )
+        """
+        if is_sqlite()
+        else """
+        CREATE TABLE IF NOT EXISTS library_file_shares (
+            id SERIAL PRIMARY KEY,
+            file_id INTEGER NOT NULL REFERENCES library_files(id) ON DELETE CASCADE,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE,
+            role VARCHAR(20) NOT NULL,
+            created_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT ck_library_file_shares_one_principal CHECK (
+                (user_id IS NOT NULL AND group_id IS NULL)
+                OR (user_id IS NULL AND group_id IS NOT NULL)
+            ),
+            CONSTRAINT ck_library_file_shares_role CHECK (
+                role IN ('viewer', 'contributor', 'manager')
+            ),
+            CONSTRAINT uq_library_file_share_user UNIQUE (file_id, user_id),
+            CONSTRAINT uq_library_file_share_group UNIQUE (file_id, group_id)
+        )
+        """,
+    )
+    await _safe_execute(
+        conn,
+        "CREATE INDEX IF NOT EXISTS ix_library_file_shares_file_id ON library_file_shares (file_id)",
+    )
+    await _safe_execute(
+        conn,
+        "CREATE INDEX IF NOT EXISTS ix_library_file_shares_user_id ON library_file_shares (user_id)",
+    )
+    await _safe_execute(
+        conn,
+        "CREATE INDEX IF NOT EXISTS ix_library_file_shares_group_id ON library_file_shares (group_id)",
+    )
 
     # Existing PostgreSQL databases predate the finance ORM tables. These must
     # exist before any ALTER TABLE / CREATE INDEX statements below reference
@@ -2899,17 +3160,6 @@ async def run_migrations(conn):
         async with conn.begin_nested():
             await conn.execute(
                 text("ALTER TABLE print_queue ADD COLUMN created_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL")
-            )
-    except (OperationalError, ProgrammingError):
-        pass  # Already applied
-
-    # Migration: Add created_by_id column to library_files for user tracking (Issue #206)
-    try:
-        async with conn.begin_nested():
-            await conn.execute(
-                text(
-                    "ALTER TABLE library_files ADD COLUMN created_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL"
-                )
             )
     except (OperationalError, ProgrammingError):
         pass  # Already applied
@@ -6103,10 +6353,15 @@ async def seed_default_groups():
                     perms.append(own_perm)
                     changed = True
                     logger.info("Added %s to %s group (backfill)", own_perm, non_admin_group_name)
-            if non_admin_group_name == "Operators" and "orca_cloud:auth" not in perms:
-                perms.append("orca_cloud:auth")
-                changed = True
-                logger.info("Added orca_cloud:auth to Operators group (backfill)")
+            if non_admin_group_name == "Operators":
+                if "orca_cloud:auth" not in perms:
+                    perms.append("orca_cloud:auth")
+                    changed = True
+                    logger.info("Added orca_cloud:auth to Operators group (backfill)")
+                if "library:share" not in perms:
+                    perms.append("library:share")
+                    changed = True
+                    logger.info("Added library:share to Operators group (backfill)")
             if changed:
                 grp.permissions = perms
         await session.commit()

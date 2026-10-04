@@ -1,3 +1,46 @@
+# BambuBuddy with library ownership and sharing
+
+This is [Minebuddy's fork](https://github.com/Minebuddy/bambuddy-filemanager) of
+[BambuBuddy](https://github.com/maziggy/bambuddy), built for schools and other shared installations.
+
+- File and folder ownership with direct user/group sharing.
+- Ancestor folders shown as navigation without exposing unrelated contents.
+- Bulk grants, revocation, and owner assignment in **Settings → Library access**.
+- Administrator review of legacy folder ownership.
+- Streaming overlay logo upload and configurable progress gradients.
+
+## Docker installation
+
+The fork's Compose file targets `ghcr.io/minebuddy/bambuddy-filemanager:latest`.
+The publishing step is being prepared; this image is not yet verified as available.
+Once published, use:
+
+```bash
+git clone https://github.com/Minebuddy/bambuddy-filemanager.git
+cd bambuddy-filemanager
+docker compose pull
+docker compose up -d
+```
+
+Until then, build from source with `docker compose up -d --build`.
+Open `http://localhost:8000`. The Compose comments explain host networking on
+Linux and port mappings for Docker Desktop or NAS installations. Portainer can
+use the same Compose file; a separate test Dockerfile is no longer needed.
+
+Back up your existing database and preserve its data/log volume paths when
+switching installations. Enable authentication and configure user/group
+permissions to use the access controls. Review unassigned legacy folder owners
+as an administrator.
+
+Update with `docker compose pull && docker compose up -d` after image publication.
+Commit-specific `sha-<full commit>` tags will allow reproducible deployments.
+The fork image uses this repository for update checks.
+
+The original documentation and credits follow. Upstream images do not contain
+this fork's access-management and overlay-branding additions.
+
+---
+
 <p align="center">
   <img src="static/img/bambuddy_logo_dark.png" alt="Bambuddy Logo" width="300">
 </p>
@@ -624,14 +667,14 @@ See the [Windows Installer Guide](https://wiki.bambuddy.cool/getting-started/win
 **Option A: Pre-built image (fastest)**
 ```bash
 mkdir bambuddy && cd bambuddy
-curl -O https://raw.githubusercontent.com/maziggy/bambuddy/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/Minebuddy/bambuddy-filemanager/main/docker-compose.yml
 docker compose up -d
 ```
 
 **Option B: Build from source**
 ```bash
-git clone https://github.com/maziggy/bambuddy.git
-cd bambuddy
+git clone https://github.com/Minebuddy/bambuddy-filemanager.git
+cd bambuddy-filemanager
 docker compose up -d --build
 ```
 
@@ -670,23 +713,13 @@ Open **http://localhost:8000** in your browser.
 docker compose pull && docker compose up -d
 
 # From source: rebuild after pulling changes
-cd bambuddy && git pull && docker compose up -d --build
+cd bambuddy-filemanager && git pull && docker compose up -d --build
 ```
 
-**Daily Beta Builds:**
+**Fork image tags:**
 
-Beta builds with the latest fixes are pushed regularly to the same beta version tag:
-
-```bash
-# Pull the current beta
-docker pull ghcr.io/maziggy/bambuddy:0.2.2b1
-# or from Docker Hub
-docker pull maziggy/bambuddy:0.2.2b1
-```
-
-Use [Watchtower](https://watchtower.nickfedor.com) (image `nickfedor/watchtower`) to automatically update when new daily builds are pushed.
-
-> **Note:** Beta builds use version tags like `0.2.2b1` — they are never tagged as `latest`. Your stable installation won't auto-update to a beta unless you explicitly pull a beta tag.
+After publication, use `ghcr.io/minebuddy/bambuddy-filemanager:latest`, or a
+published `sha-<full commit>` tag to pin a specific build.
 
 **Useful Commands:**
 

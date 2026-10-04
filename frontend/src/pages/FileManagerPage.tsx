@@ -11,6 +11,7 @@ import {
   Download,
   ExternalLink,
   MoreVertical,
+  Share2,
   ChevronRight,
   FolderPlus,
   FileBox,
@@ -66,6 +67,7 @@ import type {
   AppSettings,
   Archive,
   Permission,
+  LibraryAccessRole,
 } from '../api/client';
 import { Button } from '../components/Button';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -78,6 +80,9 @@ import { RunWithPipelineModal } from '../components/RunWithPipelineModal';
 import { BulkTagsPickerModal } from '../components/BulkTagsPickerModal';
 import { FileUploadModal } from '../components/FileUploadModal';
 import { FolderReadmePanel } from '../components/FolderReadmePanel';
+import { FolderOwnerModal } from '../components/FolderOwnerModal';
+import { LibraryAccessOverviewModal } from '../components/LibraryAccessOverviewModal';
+import { FolderSharingModal } from '../components/FolderSharingModal';
 import { LibraryTagsModal } from '../components/LibraryTagsModal';
 import { LibraryFileDetailsModal } from '../components/LibraryFileDetailsModal';
 import { PurgeOldFilesModal } from '../components/PurgeOldFilesModal';
@@ -276,6 +281,17 @@ function filterAndSortFiles(
 
   return result;
 }
+
+// Keep the filename useful when fixed columns consume the available width,
+// and give the header spacer and row checkbox one shared track so every later
+// column stays aligned. min-w-min lets each auth variant size itself to its
+// intrinsic grid width inside the overflow-x-auto wrapper (#3105). Tags get a
+// floor too: with a 0 minimum they took the squeeze the filename used to take,
+// hitting 0px right where the wrapper starts scrolling.
+const fileListGridColumns = (authEnabled: boolean) => authEnabled
+  ? 'grid-cols-[24px_minmax(240px,1fr)_120px_100px_100px_100px_minmax(96px,200px)_220px]'
+  : 'grid-cols-[24px_minmax(240px,1fr)_100px_100px_100px_minmax(96px,200px)_220px]';
+const fileListGridMinWidth = 'min-w-min';
 
 // New Folder Modal
 interface NewFolderModalProps {
@@ -515,6 +531,7 @@ function RenameModal({ type, currentName, onClose, onSave, isLoading, t }: Renam
 // Move Files Modal
 interface MoveFilesModalProps {
   folders: LibraryFolderTree[];
+  canUseAllFolders: boolean;
   selectedFiles: number[];
   currentFolderId: number | null;
   onClose: () => void;
@@ -523,13 +540,16 @@ interface MoveFilesModalProps {
   t: TFunction;
 }
 
-function MoveFilesModal({ folders, selectedFiles, currentFolderId, onClose, onMove, isLoading, t }: MoveFilesModalProps) {
+function MoveFilesModal({ folders, canUseAllFolders, selectedFiles, currentFolderId, onClose, onMove, isLoading, t }: MoveFilesModalProps) {
   const [targetFolder, setTargetFolder] = useState<number | null>(null);
 
   const flattenFolders = (items: LibraryFolderTree[], depth = 0): { id: number | null; name: string; depth: number }[] => {
     const result: { id: number | null; name: string; depth: number }[] = [];
     for (const item of items) {
-      result.push({ id: item.id, name: item.name, depth });
+      if ((canUseAllFolders || item.access_role === 'contributor' || item.access_role === 'manager') &&
+          !(item.is_external && item.external_readonly)) {
+        result.push({ id: item.id, name: item.name, depth });
+      }
       if (item.children.length > 0) {
         result.push(...flattenFolders(item.children, depth + 1));
       }
@@ -759,6 +779,10 @@ interface FolderTreeItemProps {
   onDelete: (id: number) => void;
   onLink: (folder: LibraryFolderTree) => void;
   onRename: (folder: LibraryFolderTree) => void;
+  onManageOwner: (folder: LibraryFolderTree) => void;
+  onManageAccess: (folder: LibraryFolderTree) => void;
+  currentUserId: number | null;
+  isAdmin: boolean;
   depth?: number;
   wrapNames?: boolean;
   defaultExpanded?: boolean;
@@ -777,6 +801,10 @@ interface FolderActionsMenuProps {
   onDelete: (id: number) => void;
   onLink: (folder: LibraryFolderTree) => void;
   onRename: (folder: LibraryFolderTree) => void;
+  onManageOwner: (folder: LibraryFolderTree) => void;
+  onManageAccess: (folder: LibraryFolderTree) => void;
+  currentUserId: number | null;
+  isAdmin: boolean;
   hasPermission: (permission: Permission) => boolean;
   // Hide the kebab until its `group` row is hovered or focused — only for
   // pointers that can hover (#2865). The menu is a DOM descendant, so the
@@ -787,7 +815,7 @@ interface FolderActionsMenuProps {
   t: TFunction;
 }
 
-function FolderActionsMenu({ folder, onDelete, onLink, onRename, hasPermission, revealOnHover = false, tabIndex, t }: FolderActionsMenuProps) {
+function FolderActionsMenu({ folder, onDelete, onLink, onRename, onManageOwner, onManageAccess, currentUserId, isAdmin, hasPermission, revealOnHover = false, tabIndex, t }: FolderActionsMenuProps) {
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -798,21 +826,26 @@ function FolderActionsMenu({ folder, onDelete, onLink, onRename, hasPermission, 
     // moved elsewhere (click-outside, the columns pane) is left alone.
     if (rootRef.current?.contains(document.activeElement)) buttonRef.current?.focus();
   };
-  const hasChildren = folder.children.length > 0;
   const isLinked = folder.project_id || folder.archive_id;
   const isExternal = folder.is_external;
-  // #1781: users with only library:delete_own may delete empty, unlinked,
-  // non-external folders. The backend enforces the same rule and additionally
-  // counts trashed files (invisible here), so a 403 can still come back.
-  const canDeleteFolder =
-    hasPermission('library:delete_all') ||
-    (hasPermission('library:delete_own') && folder.file_count === 0 && !hasChildren && !isExternal && !isLinked);
+  const hasManagerAccess = isAdmin || folder.access_role === 'manager';
+  const hasDeleteAll = hasPermission('library:delete_all');
+  const canDeleteManagedFolder =
+    hasPermission('library:delete_own') &&
+    hasManagerAccess &&
+    !isExternal &&
+    !isLinked;
+  const canDeleteFolder = hasDeleteAll || canDeleteManagedFolder;
   const deleteDisabledTooltip = canDeleteFolder
     ? undefined
-    : hasPermission('library:delete_own') && !isExternal && !isLinked
-      ? t('fileManager.onlyEmptyFoldersDeletable')
-      : t('fileManager.noPermissionDeleteFolder');
-  const canRename = hasPermission('library:update_all');
+    : t('fileManager.noPermissionDeleteFolder');
+  const canRename =
+    hasPermission('library:update_all') ||
+    (hasPermission('library:update_own') && hasManagerAccess);
+  const canManageAccess =
+    !isExternal &&
+    hasPermission('library:share') &&
+    (isAdmin || (currentUserId !== null && folder.created_by_id === currentUserId));
 
   const items: ContextMenuItem[] = [
     {
@@ -829,6 +862,20 @@ function FolderActionsMenu({ folder, onDelete, onLink, onRename, hasPermission, 
       disabled: !canRename,
       title: !canRename ? t('fileManager.noPermissionLinkFolder') : undefined,
     },
+    ...(canManageAccess
+      ? [{
+          label: t('fileManager.sharing.manage', { defaultValue: 'Manage access' }),
+          icon: <Share2 className="w-3.5 h-3.5" />,
+          onClick: () => onManageAccess(folder),
+        }]
+      : []),
+    ...(isAdmin && !isExternal
+      ? [{
+          label: t('fileManager.folderOwner.manage', { defaultValue: 'Manage owner' }),
+          icon: <User className="w-3.5 h-3.5" />,
+          onClick: () => onManageOwner(folder),
+        }]
+      : []),
     {
       label: t('common.delete'),
       icon: <Trash2 className="w-3.5 h-3.5" />,
@@ -876,7 +923,7 @@ function FolderActionsMenu({ folder, onDelete, onLink, onRename, hasPermission, 
   );
 }
 
-function FolderTreeItem({ folder, selectedFolderId, onSelect, onDelete, onLink, onRename, depth = 0, wrapNames = false, defaultExpanded = true, showModified = false, hasPermission, t }: FolderTreeItemProps) {
+function FolderTreeItem({ folder, selectedFolderId, onSelect, onDelete, onLink, onRename, onManageOwner, onManageAccess, currentUserId, isAdmin, depth = 0, wrapNames = false, defaultExpanded = true, showModified = false, hasPermission, t }: FolderTreeItemProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const hasChildren = folder.children.length > 0;
   const isLinked = folder.project_id || folder.archive_id;
@@ -964,6 +1011,10 @@ function FolderTreeItem({ folder, selectedFolderId, onSelect, onDelete, onLink, 
           onDelete={onDelete}
           onLink={onLink}
           onRename={onRename}
+          onManageOwner={onManageOwner}
+          onManageAccess={onManageAccess}
+          currentUserId={currentUserId}
+          isAdmin={isAdmin}
           hasPermission={hasPermission}
           revealOnHover={!wrapNames}
           t={t}
@@ -980,6 +1031,10 @@ function FolderTreeItem({ folder, selectedFolderId, onSelect, onDelete, onLink, 
               onDelete={onDelete}
               onLink={onLink}
               onRename={onRename}
+              onManageOwner={onManageOwner}
+              onManageAccess={onManageAccess}
+              currentUserId={currentUserId}
+              isAdmin={isAdmin}
               depth={depth + 1}
               wrapNames={wrapNames}
               defaultExpanded={defaultExpanded}
@@ -1018,13 +1073,19 @@ interface FileCardProps {
   onTagClick?: (tagId: number) => void;
   thumbnailVersion?: number;
   hasPermission: (permission: Permission) => boolean;
-  canModify: (resource: 'queue' | 'archives' | 'library', action: 'update' | 'delete' | 'reprint', createdById: number | null | undefined) => boolean;
+  canReadLibrary: boolean;
+  canModify: (
+    resource: 'queue' | 'archives' | 'library',
+    action: 'update' | 'delete' | 'reprint',
+    createdById: number | null | undefined,
+    accessRole?: LibraryAccessRole | null,
+  ) => boolean;
   authEnabled: boolean;
   showModified: boolean;
   t: TFunction;
 }
 
-function FileCard({ file, isSelected, onSelect, onDelete, onDownload, onPrint, onSlice, onOpenInSlicer, onRunPipeline, useSlicerApi, desktopSlicer, canSlice, onPreview, onRename, onDetails, onGenerateThumbnail, onTagClick, thumbnailVersion, hasPermission, canModify, authEnabled, showModified, t }: FileCardProps) {
+function FileCard({ file, isSelected, onSelect, onDelete, onDownload, onPrint, onSlice, onOpenInSlicer, onRunPipeline, useSlicerApi, desktopSlicer, canSlice, onPreview, onRename, onDetails, onGenerateThumbnail, onTagClick, thumbnailVersion, hasPermission, canReadLibrary, canModify, authEnabled, showModified, t }: FileCardProps) {
   // Viewport coordinates rather than a flag, because the menu is rendered by
   // `ContextMenu` at `position: fixed` and anchored to the button (#2846). The
   // card it belongs to is only ~270px tall for a bare STL, which is shorter
@@ -1032,9 +1093,9 @@ function FileCard({ file, isSelected, onSelect, onDelete, onDownload, onPrint, o
   // top entry -- Slice -- cut off. The archive card menu works the same way.
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number } | null>(null);
 
-  const canPreview3d = hasPermission('library:read');
-  const canRename = canModify('library', 'update', file.created_by_id);
-  const canDelete = canModify('library', 'delete', file.created_by_id);
+  const canPreview3d = canReadLibrary;
+  const canRename = canModify('library', 'update', file.created_by_id, file.access_role);
+  const canDelete = canModify('library', 'delete', file.created_by_id, file.access_role);
 
   const menuItems: ContextMenuItem[] = [];
   if (onPrint && isSlicedLibraryFile(file)) {
@@ -1080,8 +1141,8 @@ function FileCard({ file, isSelected, onSelect, onDelete, onDownload, onPrint, o
     label: t('common.download'),
     icon: <Download className="w-4 h-4" />,
     onClick: () => onDownload(file.id),
-    disabled: !hasPermission('library:read'),
-    title: !hasPermission('library:read') ? t('fileManager.noPermissionDownload') : undefined,
+    disabled: !canReadLibrary,
+    title: !canReadLibrary ? t('fileManager.noPermissionDownload') : undefined,
   });
   if (onRename) {
     menuItems.push({
@@ -1324,16 +1385,22 @@ interface FileActionStripProps {
   thumbnailPending: boolean;
   onDelete: (id: number) => void;
   hasPermission: (permission: Permission) => boolean;
-  canModify: (resource: 'queue' | 'archives' | 'library', action: 'update' | 'delete' | 'reprint', createdById: number | null | undefined) => boolean;
+  canReadLibrary: boolean;
+  canModify: (
+    resource: 'queue' | 'archives' | 'library',
+    action: 'update' | 'delete' | 'reprint',
+    createdById: number | null | undefined,
+    accessRole?: LibraryAccessRole | null,
+  ) => boolean;
   // Roving tabindex for the columns view: only the focused row's buttons take
   // part in the Tab order, so Tab from the pane lands on that row's actions.
   tabIndex?: number;
   t: TFunction;
 }
 
-function FileActionStrip({ file, onPrint, onSlice, onOpenInSlicer, onRunPipeline, useSlicerApi, desktopSlicer, canSlice, onPreview, onDetails, onDownload, onRename, onGenerateThumbnail, thumbnailPending, onDelete, hasPermission, canModify, tabIndex, t }: FileActionStripProps) {
-  const canRename = canModify('library', 'update', file.created_by_id);
-  const canDelete = canModify('library', 'delete', file.created_by_id);
+function FileActionStrip({ file, onPrint, onSlice, onOpenInSlicer, onRunPipeline, useSlicerApi, desktopSlicer, canSlice, onPreview, onDetails, onDownload, onRename, onGenerateThumbnail, thumbnailPending, onDelete, hasPermission, canReadLibrary, canModify, tabIndex, t }: FileActionStripProps) {
+  const canRename = canModify('library', 'update', file.created_by_id, file.access_role);
+  const canDelete = canModify('library', 'delete', file.created_by_id, file.access_role);
   return (
     <div className="flex items-center gap-1" data-file-actions {...stopRowActivation}>
       {isSlicedLibraryFile(file) && (
@@ -1387,14 +1454,14 @@ function FileActionStrip({ file, onPrint, onSlice, onOpenInSlicer, onRunPipeline
       {isModelPreview(file) && (
         <button
           tabIndex={tabIndex}
-          onClick={() => hasPermission('library:read') && onPreview(file)}
+          onClick={() => canReadLibrary && onPreview(file)}
           className={`p-1.5 rounded transition-colors ${
-            hasPermission('library:read')
+            canReadLibrary
               ? 'hover:bg-bambu-dark text-bambu-gray hover:text-bambu-green'
               : 'text-bambu-gray/50 cursor-not-allowed'
           }`}
-          title={hasPermission('library:read') ? t('fileManager.preview3d') : t('fileManager.noPermissionPreview')}
-          disabled={!hasPermission('library:read')}
+          title={canReadLibrary ? t('fileManager.preview3d') : t('fileManager.noPermissionPreview')}
+          disabled={!canReadLibrary}
         >
           <Box className="w-4 h-4" />
         </button>
@@ -1402,41 +1469,41 @@ function FileActionStrip({ file, onPrint, onSlice, onOpenInSlicer, onRunPipeline
       {!isModelPreview(file) && isPreviewableLibraryFile(file) && (
         <button
           tabIndex={tabIndex}
-          onClick={() => hasPermission('library:read') && onPreview(file)}
+          onClick={() => canReadLibrary && onPreview(file)}
           className={`p-1.5 rounded transition-colors ${
-            hasPermission('library:read')
+            canReadLibrary
               ? 'hover:bg-bambu-dark text-bambu-gray hover:text-bambu-green'
               : 'text-bambu-gray/50 cursor-not-allowed'
           }`}
-          title={hasPermission('library:read') ? t('fileManager.preview.open') : t('fileManager.noPermissionPreview')}
-          disabled={!hasPermission('library:read')}
+          title={canReadLibrary ? t('fileManager.preview.open') : t('fileManager.noPermissionPreview')}
+          disabled={!canReadLibrary}
         >
           {documentPreviewIcon(file.file_type)}
         </button>
       )}
       <button
         tabIndex={tabIndex}
-        onClick={() => hasPermission('library:read') && onDownload(file.id)}
+        onClick={() => canReadLibrary && onDownload(file.id)}
         className={`p-1.5 rounded transition-colors ${
-          hasPermission('library:read')
+          canReadLibrary
             ? 'hover:bg-bambu-dark text-bambu-gray hover:text-white'
             : 'text-bambu-gray/50 cursor-not-allowed'
         }`}
-        title={hasPermission('library:read') ? t('common.download') : t('fileManager.noPermissionDownload')}
-        disabled={!hasPermission('library:read')}
+        title={canReadLibrary ? t('common.download') : t('fileManager.noPermissionDownload')}
+        disabled={!canReadLibrary}
       >
         <Download className="w-4 h-4" />
       </button>
       <button
         tabIndex={tabIndex}
-        onClick={() => hasPermission('library:read') && onDetails(file)}
+        onClick={() => canReadLibrary && onDetails(file)}
         className={`p-1.5 rounded transition-colors ${
-          hasPermission('library:read')
+          canReadLibrary
             ? 'hover:bg-bambu-dark text-bambu-gray hover:text-white'
             : 'text-bambu-gray/50 cursor-not-allowed'
         }`}
-        title={hasPermission('library:read') ? t('fileManager.details.title') : t('fileManager.noPermissionPreview')}
-        disabled={!hasPermission('library:read')}
+        title={canReadLibrary ? t('fileManager.details.title') : t('fileManager.noPermissionPreview')}
+        disabled={!canReadLibrary}
       >
         <Info className="w-4 h-4" />
       </button>
@@ -1562,7 +1629,8 @@ export function FileManagerPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const { hasPermission, hasAnyPermission, canModify, authEnabled } = useAuth();
+  const { user, hasPermission, hasAnyPermission, canModify, authEnabled, isAdmin } = useAuth();
+  const canReadLibrary = hasAnyPermission('library:read', 'library:read_own', 'library:read_all');
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
@@ -1584,6 +1652,7 @@ export function FileManagerPage() {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [droppedFiles, setDroppedFiles] = useState<File[]>([]);
   const [showPurgeModal, setShowPurgeModal] = useState(false);
+  const [showAccessOverview, setShowAccessOverview] = useState(false);
   // Tag UI state (#1268). selectedTagIds is the AND-style filter applied to
   // the listing; setting it bypasses folder scoping on the server so
   // "every toy" works regardless of which folder is currently selected.
@@ -1591,6 +1660,9 @@ export function FileManagerPage() {
   const [showBulkTagsModal, setShowBulkTagsModal] = useState(false);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [linkFolder, setLinkFolder] = useState<LibraryFolderTree | null>(null);
+  const [ownerFolder, setOwnerFolder] = useState<LibraryFolderTree | null>(null);
+  const [sharingFile, setSharingFile] = useState<{id: number; name: string} | null>(null);
+  const [sharingFolder, setSharingFolder] = useState<LibraryFolderTree | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'file' | 'folder' | 'bulk'; id: number; count?: number } | null>(null);
   const [printFile, setPrintFile] = useState<LibraryFileListItem | null>(null);
   const [sliceFile, setSliceFile] = useState<LibraryFileListItem | null>(null);
@@ -1789,6 +1861,21 @@ export function FileManagerPage() {
     };
     return sortLevel(folders);
   }, [folders, folderSortField, folderSortDirection]);
+
+  // Resolve the selected folder early so upload/create affordances can use
+  // its effective shared access role.
+  const selectedFolder = useMemo(() => {
+    if (!selectedFolderId || !folders) return null;
+    const findFolder = (items: LibraryFolderTree[]): LibraryFolderTree | null => {
+      for (const item of items) {
+        if (item.id === selectedFolderId) return item;
+        const found = findFolder(item.children);
+        if (found) return found;
+      }
+      return null;
+    };
+    return findFolder(folders);
+  }, [selectedFolderId, folders]);
 
   // Trash count for the header badge (#1008). Empty/error are silently treated
   // as zero so a broken trash endpoint doesn't break the File Manager.
@@ -2023,12 +2110,23 @@ export function FileManagerPage() {
   const moveFilesMutation = useMutation({
     mutationFn: ({ fileIds, folderId }: { fileIds: number[]; folderId: number | null }) =>
       api.moveLibraryFiles(fileIds, folderId),
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['library-files'] });
       queryClient.invalidateQueries({ queryKey: ['library-folders'] });
       setSelectedFiles([]);
       setShowMoveModal(false);
-      showToast(t('fileManager.toast.filesMoved'), 'success');
+      if (result.skipped > 0) {
+        showToast(
+          t('fileManager.toast.moveSkipped', {
+            defaultValue: '{{moved}} files moved; {{skipped}} skipped. Check your access to the source and destination.',
+            moved: result.moved,
+            skipped: result.skipped,
+          }),
+          'error',
+        );
+      } else {
+        showToast(t('fileManager.toast.filesMoved'), 'success');
+      }
     },
     onError: (error: Error) => showToast(error.message, 'error'),
   });
@@ -2130,7 +2228,7 @@ export function FileManagerPage() {
   // uses; everything else opens the modal for its type. A file with no
   // preview does nothing.
   const openPreview = useCallback((file: LibraryFileListItem) => {
-    if (!hasPermission('library:read')) return;
+    if (!canReadLibrary) return;
     if (isSlicedLibraryFile(file)) {
       navigate(`/gcode-viewer?library_file=${file.id}`);
     } else if (file.file_type === '3mf' || file.file_type === 'stl' || isStepType(file.file_type)) {
@@ -2142,7 +2240,7 @@ export function FileManagerPage() {
     } else if (isPreviewableImageType(file.file_type)) {
       setImagePreviewFile(file);
     }
-  }, [hasPermission, navigate]);
+  }, [canReadLibrary, navigate]);
 
   // Handlers
   const handleFileSelect = useCallback((id: number) => {
@@ -2183,7 +2281,35 @@ export function FileManagerPage() {
   // and also disabled while the upload modal itself is open so drags into
   // the modal's own drop zone don't bubble up and flash the page overlay
   // behind it.
-  const canUpload = hasPermission('library:upload');
+  const canContributeToSelectedFolder =
+    selectedFolderId === null ||
+    isAdmin ||
+    hasPermission('library:update_all') ||
+    selectedFolder?.access_role === 'contributor' ||
+    selectedFolder?.access_role === 'manager';
+  const canUpload =
+    hasPermission('library:upload') && canContributeToSelectedFolder;
+
+  const canModifyWithAccess = useCallback(
+    (
+      resource: 'queue' | 'archives' | 'library',
+      action: 'update' | 'delete' | 'reprint',
+      createdById: number | null | undefined,
+      accessRole?: LibraryAccessRole | null,
+    ): boolean => {
+      if (canModify(resource, action, createdById)) return true;
+      if (resource !== 'library' || accessRole !== 'manager') return false;
+      if (action === 'update') {
+        return hasAnyPermission('library:update_own', 'library:update_all');
+      }
+      if (action === 'delete') {
+        return hasAnyPermission('library:delete_own', 'library:delete_all');
+      }
+      return false;
+    },
+    [canModify, hasAnyPermission],
+  );
+
   const { isDraggingOver, dragHandlers } = usePageFileDrop({
     disabled: !canUpload || showUploadModal,
     onFiles: (files) => {
@@ -2198,7 +2324,7 @@ export function FileManagerPage() {
   const previewSnapshotHandler = useCallback(
     (file: LibraryFileListItem): ((blob: Blob) => void) | undefined => {
       if (file.thumbnail_path) return undefined;
-      if (!canModify('library', 'update', file.created_by_id)) return undefined;
+      if (!canModifyWithAccess('library', 'update', file.created_by_id, file.access_role)) return undefined;
       return (blob: Blob) => {
         api
           .uploadLibraryPreviewThumbnail(file.id, blob)
@@ -2213,7 +2339,7 @@ export function FileManagerPage() {
           });
       };
     },
-    [canModify, queryClient]
+    [canModifyWithAccess, queryClient]
   );
 
   const handleDownload = (id: number) => {
@@ -2257,25 +2383,12 @@ export function FileManagerPage() {
     thumbnailPending: singleThumbnailMutation.isPending,
     onDelete: (id: number) => setDeleteConfirm({ type: 'file', id }),
     hasPermission,
-    canModify,
+    canReadLibrary,
+    canModify: canModifyWithAccess,
     t,
   };
 
   const isLoading = foldersLoading || filesLoading;
-
-  // Find the selected folder in the tree to check external status
-  const selectedFolder = useMemo(() => {
-    if (!selectedFolderId || !folders) return null;
-    const findFolder = (items: LibraryFolderTree[]): LibraryFolderTree | null => {
-      for (const item of items) {
-        if (item.id === selectedFolderId) return item;
-        const found = findFolder(item.children);
-        if (found) return found;
-      }
-      return null;
-    };
-    return findFolder(folders);
-  }, [selectedFolderId, folders]);
 
   // The chain of folders from a top-level folder down to the selected one.
   // Selection is the single source of truth — clicking a folder anywhere just
@@ -2725,8 +2838,8 @@ export function FileManagerPage() {
           <Button
             variant="secondary"
             onClick={() => setShowNewFolderModal(true)}
-            disabled={!hasPermission('library:upload')}
-            title={!hasPermission('library:upload') ? t('fileManager.noPermissionCreateFolder') : undefined}
+            disabled={!canUpload}
+            title={!canUpload ? t('fileManager.noPermissionCreateFolder') : undefined}
           >
             <FolderPlus className="w-4 h-4 mr-2" />
             {t('fileManager.newFolder')}
@@ -2739,6 +2852,20 @@ export function FileManagerPage() {
             <TagIcon className="w-4 h-4 mr-2" />
             {t('fileManager.tags.manage')}
           </Button>
+          {isAdmin && (
+            <Button
+              variant="secondary"
+              onClick={() => setShowAccessOverview(true)}
+              title={t('fileManager.accessOverview.title', {
+                defaultValue: 'Review unassigned and ambiguous library folders',
+              })}
+            >
+              <Share2 className="w-4 h-4 mr-2" />
+              {t('fileManager.accessOverview.button', {
+                defaultValue: 'Review access',
+              })}
+            </Button>
+          )}
           {hasPermission('library:purge') && (
             <Button
               variant="secondary"
@@ -2766,8 +2893,8 @@ export function FileManagerPage() {
           )}
           <Button
             onClick={() => setShowUploadModal(true)}
-            disabled={!hasPermission('library:upload')}
-            title={!hasPermission('library:upload') ? t('fileManager.noPermissionUpload') : undefined}
+            disabled={!canUpload}
+            title={!canUpload ? t('fileManager.noPermissionUpload') : undefined}
           >
             <Upload className="w-4 h-4 mr-2" />
             {t('common.upload')}
@@ -3001,6 +3128,10 @@ export function FileManagerPage() {
                 onDelete={(id) => setDeleteConfirm({ type: 'folder', id })}
                 onLink={setLinkFolder}
                 onRename={(f) => setRenameItem({ type: 'folder', id: f.id, name: f.name })}
+                onManageOwner={setOwnerFolder}
+                onManageAccess={setSharingFolder}
+                currentUserId={user?.id ?? null}
+                isAdmin={isAdmin}
                 wrapNames={wrapFolderNames}
                 defaultExpanded={!collapseFoldersByDefault}
                 showModified={showModified}
@@ -3252,13 +3383,17 @@ export function FileManagerPage() {
                   </span>
                   <div className="hidden sm:block flex-1" />
                   <div className="w-full sm:w-auto flex flex-wrap items-center gap-2 mt-2 sm:mt-0">
+                    {selectedFiles.length === 1 && hasPermission('library:share') && (() => {
+                      const file = selectableFiles.get(selectedFiles[0]);
+                      return file && !file.is_external && (isAdmin || file.created_by_id === user?.id) ? <Button variant="secondary" size="sm" onClick={() => setSharingFile({id: file.id, name: file.filename})}><Share2 className="w-4 h-4 mr-1" />Manage access</Button> : null;
+                    })()}
                     {previewSelection && (
                       <Button
                         variant="secondary"
                         size="sm"
                         onClick={() => openPreview(previewSelection)}
-                        disabled={!hasPermission('library:read')}
-                        title={!hasPermission('library:read') ? t('fileManager.noPermissionPreview') : undefined}
+                        disabled={!canReadLibrary}
+                        title={!canReadLibrary ? t('fileManager.noPermissionPreview') : undefined}
                       >
                         <Eye className="w-4 h-4 sm:mr-1" />
                         <span className="hidden sm:inline">{t('fileManager.preview.open')}</span>
@@ -3304,7 +3439,7 @@ export function FileManagerPage() {
                         variant="secondary"
                         size="sm"
                         onClick={() => setShowCombineModal(true)}
-                        disabled={!hasPermission('library:upload')}
+                        disabled={!canUpload}
                         title={t('fileManager.combine.tooltip')}
                       >
                         <Combine className="w-4 h-4 sm:mr-1" />
@@ -3462,6 +3597,10 @@ export function FileManagerPage() {
                             onDelete={(id) => setDeleteConfirm({ type: 'folder', id })}
                             onLink={setLinkFolder}
                             onRename={(f) => setRenameItem({ type: 'folder', id: f.id, name: f.name })}
+                            onManageOwner={setOwnerFolder}
+                            onManageAccess={setSharingFolder}
+                            currentUserId={user?.id ?? null}
+                            isAdmin={isAdmin}
                             hasPermission={hasPermission}
                             revealOnHover={!isSelectedFolder}
                             tabIndex={isSelectedFolder ? 0 : -1}
@@ -3607,7 +3746,8 @@ export function FileManagerPage() {
                     onTagClick={toggleTagFilter}
                     thumbnailVersion={thumbnailVersions[file.id]}
                     hasPermission={hasPermission}
-                    canModify={canModify}
+                    canReadLibrary={canReadLibrary}
+                    canModify={canModifyWithAccess}
                     authEnabled={authEnabled}
                     showModified={showModified}
                   />
@@ -3628,7 +3768,10 @@ export function FileManagerPage() {
                     grids that compute `min-content` independently — the header's empty
                     trailing div resolved to 0px, leaving body columns shifted left of
                     their headers. Fixed width keeps header and body in lockstep. */}
-                <div className={`hidden sm:grid ${authEnabled ? 'grid-cols-[auto_1fr_120px_100px_100px_100px_minmax(0,200px)_220px]' : 'grid-cols-[auto_1fr_100px_100px_100px_minmax(0,200px)_220px]'} gap-4 px-4 py-2 bg-bambu-dark-secondary border-b border-bambu-dark-tertiary text-xs text-bambu-gray font-medium`}>
+                <div
+                  data-testid="file-list-grid-header"
+                  className={`hidden sm:grid ${fileListGridColumns(authEnabled)} ${fileListGridMinWidth} gap-4 px-4 py-2 bg-bambu-dark-secondary border-b border-bambu-dark-tertiary text-xs text-bambu-gray font-medium`}
+                >
                   <div className="w-6" />
                   <div>{t('common.name')}</div>
                   {authEnabled && <div>{t('fileManager.uploadedBy', { defaultValue: 'Uploaded By' })}</div>}
@@ -3642,7 +3785,8 @@ export function FileManagerPage() {
                 {filteredAndSortedFiles.map((file) => (
                   <div
                     key={file.id}
-                    className={`grid ${authEnabled ? 'grid-cols-[auto_1fr_120px_100px_100px_100px_minmax(0,200px)_220px]' : 'grid-cols-[auto_1fr_100px_100px_100px_minmax(0,200px)_220px]'} gap-4 px-4 py-3 items-center border-b border-bambu-dark-tertiary last:border-b-0 cursor-pointer hover:bg-bambu-dark/50 transition-colors ${
+                    data-testid="file-list-grid-row"
+                    className={`grid ${fileListGridColumns(authEnabled)} ${fileListGridMinWidth} gap-4 px-4 py-3 items-center border-b border-bambu-dark-tertiary last:border-b-0 cursor-pointer hover:bg-bambu-dark/50 transition-colors ${
                       selectedFiles.includes(file.id) ? 'bg-bambu-green/10' : ''
                     }`}
                     onClick={() => handleFileSelect(file.id)}
@@ -3749,9 +3893,9 @@ export function FileManagerPage() {
                     {/* Prints */}
                     <div className="text-sm text-bambu-gray">{file.print_count > 0 ? `${file.print_count}x` : '-'}</div>
                     {/* Tags (#1268) — clickable chips push into the active
-                        filter; minmax(0,200px) on the column lets the cell
-                        shrink/wrap on narrow viewports without pushing the
-                        Actions cell off-screen. */}
+                        filter; minmax(96px,200px) on the column lets the cell
+                        shrink/wrap on narrow viewports, and the 96px floor
+                        keeps chips readable once the wrapper scrolls (#3105). */}
                     <div className="min-w-0" {...stopRowActivation}>
                       {!file.tags || file.tags.length === 0 ? (
                         <span className="text-xs text-bambu-gray/50">-</span>
@@ -3809,6 +3953,7 @@ export function FileManagerPage() {
       {showMoveModal && folders && (
         <MoveFilesModal
           folders={folders}
+          canUseAllFolders={!authEnabled || hasPermission('library:update_all')}
           selectedFiles={selectedFiles}
           currentFolderId={selectedFolderId}
           onClose={() => setShowMoveModal(false)}
@@ -3834,6 +3979,21 @@ export function FileManagerPage() {
         <PurgeOldFilesModal onClose={() => setShowPurgeModal(false)} />
       )}
 
+      {showAccessOverview && isAdmin && (
+        <LibraryAccessOverviewModal
+          folders={sortedFolders ?? []}
+          onClose={() => setShowAccessOverview(false)}
+          onManageOwner={(folder) => {
+            setShowAccessOverview(false);
+            setOwnerFolder(folder);
+          }}
+          onManageAccess={(folder) => {
+            setShowAccessOverview(false);
+            setSharingFolder(folder);
+          }}
+        />
+      )}
+
       <LibraryTagsModal
         open={showTagsModal}
         onClose={() => setShowTagsModal(false)}
@@ -3849,6 +4009,21 @@ export function FileManagerPage() {
         fileIds={selectedFiles}
         onClose={() => setShowBulkTagsModal(false)}
       />
+
+      {ownerFolder && isAdmin && (
+        <FolderOwnerModal
+          folder={ownerFolder}
+          onClose={() => setOwnerFolder(null)}
+        />
+      )}
+
+      {sharingFile && <FolderSharingModal folder={sharingFile} kind="files" onClose={() => setSharingFile(null)} />}
+      {sharingFolder && hasPermission('library:share') && (
+        <FolderSharingModal
+          folder={sharingFolder}
+          onClose={() => setSharingFolder(null)}
+        />
+      )}
 
       {linkFolder && (
         <LinkFolderModal
@@ -4007,7 +4182,7 @@ export function FileManagerPage() {
       {detailsFile && (
         <LibraryFileDetailsModal
           file={detailsFile}
-          canEdit={canModify('library', 'update', detailsFile.created_by_id)}
+          canEdit={canModifyWithAccess('library', 'update', detailsFile.created_by_id, detailsFile.access_role)}
           onClose={() => setDetailsFile(null)}
         />
       )}

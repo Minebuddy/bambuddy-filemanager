@@ -60,14 +60,11 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Copy backend
 COPY backend/ ./backend/
 
-# Capture the current git branch at build time. `.git/HEAD` is the only
-# .git metadata the build context lets through (see .dockerignore); it
-# contains `ref: refs/heads/<branch>`, which the SpoolBuddy remote-update
-# flow reads at runtime via detect_current_branch() in spoolbuddy_ssh.py.
-# Without this, the production image has no git metadata at all and would
-# always pull `main` on the remote device regardless of which branch
-# Bambuddy itself was built from.
-COPY .git/HEAD ./.git/HEAD
+# Support source archives and Portainer builds without .git metadata.
+# Override when building another branch locally.
+ARG BAMBUDDY_BUILD_BRANCH=main
+RUN mkdir -p .git && printf 'ref: refs/heads/%s\n' "$BAMBUDDY_BUILD_BRANCH" > .git/HEAD
+ENV BAMBUDDY_GITHUB_REPO=Minebuddy/bambuddy-filemanager
 
 # Copy built frontend from builder stage
 COPY --from=frontend-builder /app/static ./static

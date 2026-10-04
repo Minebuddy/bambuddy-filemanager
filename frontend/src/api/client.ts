@@ -4261,7 +4261,7 @@ export type Permission =
   | 'queue:reorder'
   | 'library:read' | 'library:read_own' | 'library:read_all' | 'library:upload'
   | 'library:update_own' | 'library:update_all' | 'library:delete_own' | 'library:delete_all'
-  | 'library:purge'
+  | 'library:share' | 'library:purge'
   | 'projects:read' | 'projects:create' | 'projects:update' | 'projects:delete'
   | 'filaments:read' | 'filaments:create' | 'filaments:update' | 'filaments:delete'
   | 'inventory:read' | 'inventory:create' | 'inventory:update' | 'inventory:delete' | 'inventory:view_assignments'
@@ -4617,6 +4617,33 @@ export interface AuthStatus {
 
 // API functions
 export const api = {
+  // Overlay branding
+  getOverlayLogo: async (token: string | null, signal?: AbortSignal): Promise<Blob | null> => {
+    const endpoint = token ? `/overlay-branding/logo?token=${encodeURIComponent(token)}` : '/settings/overlay-logo';
+    const response = await fetch(`${API_BASE}${endpoint}`, {
+      signal, cache: 'no-store',
+      headers: !token && authToken ? { Authorization: `Bearer ${authToken}` } : {},
+    });
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.blob();
+  },
+  uploadOverlayLogo: async (file: File): Promise<void> => {
+    const body = new FormData();
+    body.append('file', file);
+    const response = await fetch(`${API_BASE}/settings/overlay-logo`, {
+      method: 'POST', body,
+      headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      const detail = error?.detail;
+      const message = typeof detail === 'string' ? detail : detail?.message;
+      throw new Error(typeof message === 'string' && message ? message : `HTTP ${response.status}`);
+    }
+  },
+  deleteOverlayLogo: () => request<{ status: string }>('/settings/overlay-logo', { method: 'DELETE' }),
+
   // Authentication
   getAuthStatus: () => request<AuthStatus>('/auth/status'),
   setupAuth: (data: SetupRequest) =>
@@ -7816,7 +7843,7 @@ export const api = {
     }),
   getLibraryFileGcodeUrl: (id: number) => `${API_BASE}/library/files/${id}/gcode`,
   moveLibraryFiles: (fileIds: number[], folderId: number | null) =>
-    request<{ status: string; moved: number }>('/library/files/move', {
+    request<{ status: string; moved: number; skipped: number; skipped_reasons: { file_id: number; code: string; reason: string }[] }>('/library/files/move', {
       method: 'POST',
       body: JSON.stringify({ file_ids: fileIds, folder_id: folderId }),
     }),
@@ -8301,10 +8328,13 @@ export interface StorageUsageResponse {
 }
 
 // Library (File Manager) types
+export type LibraryAccessRole = 'viewer' | 'contributor' | 'manager';
+
 export interface LibraryFolderTree {
   id: number;
   name: string;
   parent_id: number | null;
+  created_by_id?: number | null;
   project_id: number | null;
   archive_id: number | null;
   project_name: string | null;
@@ -8313,6 +8343,8 @@ export interface LibraryFolderTree {
   external_path: string | null;
   external_readonly: boolean;
   file_count: number;
+  access_role?: LibraryAccessRole | null;
+  navigation_only?: boolean;
   // max(folder.updated_at, max(immediate-child file.updated_at)). Used by
   // the File Manager folder tree's "sort by recent activity" mode (#1770).
   latest_activity_at: string | null;
@@ -8323,6 +8355,7 @@ export interface LibraryFolder {
   id: number;
   name: string;
   parent_id: number | null;
+  created_by_id?: number | null;
   project_id: number | null;
   archive_id: number | null;
   project_name: string | null;
@@ -8332,6 +8365,7 @@ export interface LibraryFolder {
   external_readonly: boolean;
   external_show_hidden: boolean;
   file_count: number;
+  access_role?: LibraryAccessRole | null;
   latest_activity_at: string | null;
   created_at: string;
   updated_at: string;
@@ -8391,6 +8425,7 @@ export interface LibraryFile {
   source_url: string | null;
   duplicates: LibraryFileDuplicate[] | null;
   duplicate_count: number;
+  access_role?: LibraryAccessRole | null;
   // User tracking (Issue #206)
   created_by_id: number | null;
   created_by_username: string | null;
@@ -8418,6 +8453,7 @@ export interface LibraryFileListItem {
   thumbnail_path: string | null;
   print_count: number;
   duplicate_count: number;
+  access_role?: LibraryAccessRole | null;
   // User tracking (Issue #206)
   created_by_id: number | null;
   created_by_username: string | null;

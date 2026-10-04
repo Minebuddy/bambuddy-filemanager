@@ -8,6 +8,9 @@ Tests the ownership permission model where users can have:
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
+
+from backend.app.models.library import LibraryFile, LibraryFolder
 
 
 class TestOwnershipPermissionsSetup:
@@ -1053,18 +1056,1317 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
         assert stranger.status_code == 404
 
     # ========================================================================
-    # Folder deletion (#1781): folders have no ownership tracking, so users
-    # with only library:delete_own may delete empty, non-external, non-linked
-    # folders. Everything else still requires library:delete_all.
+    # Folder ownership / visibility (#3201)
     # ========================================================================
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_operator_can_delete_empty_folder(
+    async def test_operator_lists_only_owned_library_folders(
         self, async_client: AsyncClient, auth_setup, library_folder_factory
     ):
-        """A user with library:delete_own can delete an empty folder (#1781)."""
-        folder = await library_folder_factory(name="EmptyFolder")
+        own = await library_folder_factory(
+            name="OwnFolder",
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+        await library_folder_factory(
+            name="OtherFolder",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+        await library_folder_factory(name="LegacyOwnerless")
+
+        response = await async_client.get(
+            "/api/v1/library/folders",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 200
+        assert {folder["id"] for folder in response.json()} == {own.id}
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_admin_lists_all_library_folders(self, async_client: AsyncClient, auth_setup, library_folder_factory):
+        own = await library_folder_factory(
+            name="OperatorFolder",
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+        other = await library_folder_factory(
+            name="OtherOperatorFolder",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+        legacy = await library_folder_factory(name="LegacyOwnerless")
+
+        response = await async_client.get(
+            "/api/v1/library/folders",
+            headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+        )
+
+        assert response.status_code == 200
+        assert {folder["id"] for folder in response.json()} >= {own.id, other.id, legacy.id}
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_folder_count_includes_only_explicitly_visible_files(
+        self, async_client: AsyncClient, auth_setup, library_folder_factory, library_file_factory
+    ):
+        folder = await library_folder_factory(
+            name="MixedContents",
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+        await library_file_factory(
+            folder_id=folder.id,
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+        await library_file_factory(
+            folder_id=folder.id,
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+
+        response = await async_client.get(
+            "/api/v1/library/folders",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 200
+        item = next(item for item in response.json() if item["id"] == folder.id)
+        assert item["file_count"] == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_operator_get_other_users_folder_returns_404(
+        self, async_client: AsyncClient, auth_setup, library_folder_factory
+    ):
+        folder = await library_folder_factory(
+            name="PrivateOtherFolder",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+
+        response = await async_client.get(
+            f"/api/v1/library/folders/{folder.id}",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_create_folder_records_authenticated_owner(self, async_client: AsyncClient, auth_setup, db_session):
+        response = await async_client.post(
+            "/api/v1/library/folders",
+            json={"name": "MyOwnedFolder"},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 200
+        folder_id = response.json()["id"]
+        db_session.expire_all()
+        folder = (await db_session.execute(select(LibraryFolder).where(LibraryFolder.id == folder_id))).scalar_one()
+        assert folder.created_by_id == auth_setup["operator_user"]["id"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_operator_cannot_create_child_in_other_users_folder(
+        self, async_client: AsyncClient, auth_setup, library_folder_factory
+    ):
+        parent = await library_folder_factory(
+            name="OtherParent",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+
+        response = await async_client.post(
+            "/api/v1/library/folders",
+            json={"name": "SneakyChild", "parent_id": parent.id},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_operator_cannot_move_own_file_into_other_users_folder(
+        self, async_client: AsyncClient, auth_setup, library_folder_factory, library_file_factory
+    ):
+        target = await library_folder_factory(
+            name="OtherDestination",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+        file = await library_file_factory(
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+
+        response = await async_client.post(
+            "/api/v1/library/files/move",
+            json={"file_ids": [file.id], "folder_id": target.id},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_operator_cannot_update_file_destination_to_other_users_folder(
+        self, async_client: AsyncClient, auth_setup, library_folder_factory, library_file_factory
+    ):
+        target = await library_folder_factory(
+            name="OtherDestination",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+        file = await library_file_factory(
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+
+        response = await async_client.put(
+            f"/api/v1/library/files/{file.id}",
+            json={"folder_id": target.id},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_operator_cannot_extract_zip_into_other_users_folder(
+        self, async_client: AsyncClient, auth_setup, library_folder_factory
+    ):
+        import io
+        import zipfile
+
+        target = await library_folder_factory(
+            name="OtherZipDestination",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+        payload = io.BytesIO()
+        with zipfile.ZipFile(payload, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("model.txt", "hello")
+
+        response = await async_client.post(
+            f"/api/v1/library/files/extract-zip?folder_id={target.id}",
+            files={"file": ("models.zip", payload.getvalue(), "application/zip")},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_zip_created_folders_are_owned_by_operator(self, async_client: AsyncClient, auth_setup, db_session):
+        import io
+        import zipfile
+
+        payload = io.BytesIO()
+        with zipfile.ZipFile(payload, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("nested/model.txt", "hello")
+
+        response = await async_client.post(
+            "/api/v1/library/files/extract-zip?create_folder_from_zip=true&preserve_structure=true",
+            files={"file": ("OwnedBundle.zip", payload.getvalue(), "application/zip")},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 200
+        db_session.expire_all()
+        folders = (
+            (await db_session.execute(select(LibraryFolder).where(LibraryFolder.name.in_(["OwnedBundle", "nested"]))))
+            .scalars()
+            .all()
+        )
+        assert len(folders) == 2
+        assert {folder.created_by_id for folder in folders} == {auth_setup["operator_user"]["id"]}
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_makerworld_recent_imports_are_scoped_to_operator(
+        self, async_client: AsyncClient, auth_setup, library_file_factory
+    ):
+        own = await library_file_factory(
+            filename="mine.3mf",
+            created_by_id=auth_setup["operator_user"]["id"],
+            source_type="makerworld",
+            source_url="https://makerworld.com/models/own",
+        )
+        await library_file_factory(
+            filename="theirs.3mf",
+            created_by_id=auth_setup["operator2_user"]["id"],
+            source_type="makerworld",
+            source_url="https://makerworld.com/models/theirs",
+        )
+
+        response = await async_client.get(
+            "/api/v1/makerworld/recent-imports",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 200
+        assert {item["library_file_id"] for item in response.json()} == {own.id}
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_admin_can_assign_folder_owner(
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        library_folder_factory,
+        db_session,
+    ):
+        folder = await library_folder_factory(name="LegacyUnassigned")
+        folder_id = folder.id
+
+        response = await async_client.patch(
+            f"/api/v1/library/folders/{folder_id}/owner",
+            json={"created_by_id": auth_setup["operator_user"]["id"], "recursive": False},
+            headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["updated_folders"] == 1
+
+        db_session.expire_all()
+        updated = await db_session.get(LibraryFolder, folder_id)
+        assert updated is not None
+        assert updated.created_by_id == auth_setup["operator_user"]["id"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_admin_can_clear_folder_owner(
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        library_folder_factory,
+        db_session,
+    ):
+        folder = await library_folder_factory(
+            name="OwnedThenCleared",
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+        folder_id = folder.id
+
+        response = await async_client.patch(
+            f"/api/v1/library/folders/{folder_id}/owner",
+            json={"created_by_id": None, "recursive": False},
+            headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+        )
+
+        assert response.status_code == 200
+
+        db_session.expire_all()
+        updated = await db_session.get(LibraryFolder, folder_id)
+        assert updated is not None
+        assert updated.created_by_id is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_admin_recursive_owner_assignment_does_not_change_file_owners(
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        library_folder_factory,
+        library_file_factory,
+        db_session,
+    ):
+        parent = await library_folder_factory(name="MixedLegacyParent")
+        parent_id = parent.id
+        child = await library_folder_factory(name="MixedLegacyChild", parent_id=parent_id)
+        child_id = child.id
+        other_file = await library_file_factory(
+            folder_id=child_id,
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+        other_file_id = other_file.id
+
+        response = await async_client.patch(
+            f"/api/v1/library/folders/{parent_id}/owner",
+            json={"created_by_id": auth_setup["operator_user"]["id"], "recursive": True},
+            headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["updated_folders"] == 2
+
+        db_session.expire_all()
+        stored_parent = await db_session.get(LibraryFolder, parent_id)
+        stored_child = await db_session.get(LibraryFolder, child_id)
+        stored_file = await db_session.get(LibraryFile, other_file_id)
+
+        assert stored_parent is not None
+        assert stored_child is not None
+        assert stored_file is not None
+        assert stored_parent.created_by_id == auth_setup["operator_user"]["id"]
+        assert stored_child.created_by_id == auth_setup["operator_user"]["id"]
+        assert stored_file.created_by_id == auth_setup["operator2_user"]["id"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_non_admin_cannot_reassign_folder_owner(
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        library_folder_factory,
+    ):
+        folder = await library_folder_factory(name="AdminManagedFolder")
+
+        response = await async_client.patch(
+            f"/api/v1/library/folders/{folder.id}/owner",
+            json={"created_by_id": auth_setup["operator_user"]["id"]},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 403
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_admin_owner_assignment_rejects_unknown_user(
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        library_folder_factory,
+    ):
+        folder = await library_folder_factory(name="UnknownOwner")
+
+        response = await async_client.patch(
+            f"/api/v1/library/folders/{folder.id}/owner",
+            json={"created_by_id": 99999999},
+            headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_admin_cannot_assign_owner_to_external_folder(
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        library_folder_factory,
+    ):
+        folder = await library_folder_factory(
+            name="ExternalMount",
+            is_external=True,
+            external_path="/mnt/models",
+        )
+
+        response = await async_client.patch(
+            f"/api/v1/library/folders/{folder.id}/owner",
+            json={"created_by_id": auth_setup["operator_user"]["id"]},
+            headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "External folders cannot be assigned to a user"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_admin_owner_change_requires_explicit_owner_field(
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        library_folder_factory,
+        db_session,
+    ):
+        folder = await library_folder_factory(
+            name="ExplicitOwnerRequired",
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+        folder_id = folder.id
+
+        response = await async_client.patch(
+            f"/api/v1/library/folders/{folder_id}/owner",
+            json={},
+            headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+        )
+
+        assert response.status_code == 422
+
+        db_session.expire_all()
+        stored = await db_session.get(LibraryFolder, folder_id)
+        assert stored is not None
+        assert stored.created_by_id == auth_setup["operator_user"]["id"]
+
+    # ========================================================================
+    # Folder sharing / contextual access
+    # ========================================================================
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_folder_owner_can_share_without_admin(
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        library_folder_factory,
+    ):
+        folder = await library_folder_factory(
+            name="TeacherOwned",
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+
+        share = await async_client.put(
+            f"/api/v1/library/folders/{folder.id}/shares",
+            json={
+                "principal_type": "user",
+                "principal_id": auth_setup["operator2_user"]["id"],
+                "role": "viewer",
+            },
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert share.status_code == 200
+
+        # library:share is only the global capability. A different operator
+        # still cannot administer somebody else's direct grants.
+        outsider = await async_client.get(
+            f"/api/v1/library/folders/{folder.id}/shares",
+            headers={"Authorization": f"Bearer {auth_setup['operator2_token']}"},
+        )
+        assert outsider.status_code == 403
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_parent_owner_does_not_gain_access_to_contributor_child(
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        library_folder_factory,
+    ):
+        parent = await library_folder_factory(
+            name="TeacherParent",
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+
+        share = await async_client.put(
+            f"/api/v1/library/folders/{parent.id}/shares",
+            json={
+                "principal_type": "user",
+                "principal_id": auth_setup["operator2_user"]["id"],
+                "role": "contributor",
+            },
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert share.status_code == 200
+
+        child_response = await async_client.post(
+            "/api/v1/library/folders",
+            json={"name": "StudentChild", "parent_id": parent.id},
+            headers={"Authorization": f"Bearer {auth_setup['operator2_token']}"},
+        )
+        assert child_response.status_code == 200
+        child = child_response.json()
+        assert child["created_by_id"] == auth_setup["operator2_user"]["id"]
+
+        # A parent owner needs a separate grant on a contributor-owned child.
+        rename = await async_client.put(
+            f"/api/v1/library/folders/{child['id']}",
+            json={"name": "TeacherReviewedChild"},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert rename.status_code == 404
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_shared_folder_viewer_can_read_but_not_manage(
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        library_folder_factory,
+        library_file_factory,
+    ):
+        folder = await library_folder_factory(
+            name="TeacherFolder",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+        await library_file_factory(
+            folder_id=folder.id,
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+
+        share = await async_client.put(
+            f"/api/v1/library/folders/{folder.id}/shares",
+            json={
+                "principal_type": "user",
+                "principal_id": auth_setup["operator_user"]["id"],
+                "role": "viewer",
+            },
+            headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+        )
+        assert share.status_code == 200
+
+        folder_response = await async_client.get(
+            f"/api/v1/library/folders/{folder.id}",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert folder_response.status_code == 200
+
+        files_response = await async_client.get(
+            f"/api/v1/library/files?folder_id={folder.id}",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert files_response.status_code == 200
+        assert [row["id"] for row in files_response.json()] == []
+
+        rename = await async_client.put(
+            f"/api/v1/library/folders/{folder.id}",
+            json={"name": "NotAllowed"},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert rename.status_code == 403
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_contributor_can_create_subfolder_but_cannot_manage_parent(
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        library_folder_factory,
+    ):
+        folder = await library_folder_factory(
+            name="ClassDropoff",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+
+        share = await async_client.put(
+            f"/api/v1/library/folders/{folder.id}/shares",
+            json={
+                "principal_type": "user",
+                "principal_id": auth_setup["operator_user"]["id"],
+                "role": "contributor",
+            },
+            headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+        )
+        assert share.status_code == 200
+
+        create = await async_client.post(
+            "/api/v1/library/folders",
+            json={"name": "StudentWork", "parent_id": folder.id},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert create.status_code == 200
+
+        rename = await async_client.put(
+            f"/api/v1/library/folders/{folder.id}",
+            json={"name": "StillTeacherOwned"},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert rename.status_code == 403
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_manager_can_manage_files_uploaded_by_another_user(
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        library_folder_factory,
+        library_file_factory,
+    ):
+        folder = await library_folder_factory(
+            name="ManagedClassFolder",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+        file = await library_file_factory(
+            folder_id=folder.id,
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+
+        share = await async_client.put(
+            f"/api/v1/library/folders/{folder.id}/shares",
+            json={
+                "principal_type": "user",
+                "principal_id": auth_setup["operator_user"]["id"],
+                "role": "manager",
+            },
+            headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+        )
+        assert share.status_code == 200
+
+        await self._grant_file(async_client, auth_setup, file.id, "manager")
+        rename = await async_client.put(
+            f"/api/v1/library/files/{file.id}",
+            json={"filename": "manager-renamed.3mf"},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert rename.status_code == 200
+
+        delete = await async_client.delete(
+            f"/api/v1/library/files/{file.id}",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert delete.status_code == 200
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_group_share_is_explicit_and_membership_removal_revokes_access(
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        library_folder_factory,
+    ):
+        parent = await library_folder_factory(
+            name="ClassParent",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+        child = await library_folder_factory(
+            name="ClassChild",
+            parent_id=parent.id,
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+
+        group_response = await async_client.post(
+            "/api/v1/groups/",
+            json={
+                "name": "Sharing Test Class",
+                "description": "Temporary sharing test group",
+                "permissions": [],
+            },
+            headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+        )
+        assert group_response.status_code == 201
+        group_id = group_response.json()["id"]
+
+        add_member = await async_client.post(
+            f"/api/v1/groups/{group_id}/users/{auth_setup['operator_user']['id']}",
+            headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+        )
+        assert add_member.status_code in (200, 204)
+
+        share = await async_client.put(
+            f"/api/v1/library/folders/{parent.id}/shares",
+            json={
+                "principal_type": "group",
+                "principal_id": group_id,
+                "role": "viewer",
+            },
+            headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+        )
+        assert share.status_code == 200
+
+        inherited = await async_client.get(
+            f"/api/v1/library/folders/{child.id}",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert inherited.status_code == 404
+        direct = await async_client.get(
+            f"/api/v1/library/folders/{parent.id}", headers={"Authorization": f"Bearer {auth_setup['operator_token']}"}
+        )
+        assert direct.status_code == 200
+
+        remove_member = await async_client.delete(
+            f"/api/v1/groups/{group_id}/users/{auth_setup['operator_user']['id']}",
+            headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+        )
+        assert remove_member.status_code in (200, 204)
+
+        revoked = await async_client.get(
+            f"/api/v1/library/folders/{parent.id}",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert revoked.status_code == 404
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_variant_group_respects_shared_folder_role(
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        library_folder_factory,
+        library_file_factory,
+    ):
+        folder = await library_folder_factory(
+            name="SharedVariants",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+        h2s = await library_file_factory(
+            filename="shared-h2s.gcode.3mf",
+            file_type="gcode.3mf",
+            folder_id=folder.id,
+            created_by_id=auth_setup["operator2_user"]["id"],
+            file_metadata={"sliced_for_model": "H2S"},
+        )
+        h2c = await library_file_factory(
+            filename="shared-h2c.gcode.3mf",
+            file_type="gcode.3mf",
+            folder_id=folder.id,
+            created_by_id=auth_setup["operator2_user"]["id"],
+            file_metadata={"sliced_for_model": "H2C"},
+        )
+
+        group = await async_client.post(
+            "/api/v1/library/variant-groups",
+            json={
+                "name": "shared-job",
+                "members": [
+                    {"library_file_id": h2s.id},
+                    {"library_file_id": h2c.id},
+                ],
+            },
+            headers={"Authorization": f"Bearer {auth_setup['operator2_token']}"},
+        )
+        assert group.status_code == 201
+        group_id = group.json()["id"]
+
+        viewer_share = await async_client.put(
+            f"/api/v1/library/folders/{folder.id}/shares",
+            json={
+                "principal_type": "user",
+                "principal_id": auth_setup["operator_user"]["id"],
+                "role": "viewer",
+            },
+            headers={"Authorization": f"Bearer {auth_setup['operator2_token']}"},
+        )
+        assert viewer_share.status_code == 200
+        for file in (h2s, h2c):
+            await self._grant_file(async_client, auth_setup, file.id, "viewer")
+
+        visible = await async_client.get(
+            f"/api/v1/library/variant-groups/{group_id}",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert visible.status_code == 200
+
+        denied = await async_client.patch(
+            f"/api/v1/library/variant-groups/{group_id}",
+            json={"name": "viewer-cannot-rename"},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert denied.status_code == 404
+
+        manager_share = await async_client.put(
+            f"/api/v1/library/folders/{folder.id}/shares",
+            json={
+                "principal_type": "user",
+                "principal_id": auth_setup["operator_user"]["id"],
+                "role": "manager",
+            },
+            headers={"Authorization": f"Bearer {auth_setup['operator2_token']}"},
+        )
+        assert manager_share.status_code == 200
+        for file in (h2s, h2c):
+            await self._grant_file(async_client, auth_setup, file.id, "manager")
+
+        allowed = await async_client.patch(
+            f"/api/v1/library/variant-groups/{group_id}",
+            json={"name": "manager-renamed"},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert allowed.status_code == 200
+        assert allowed.json()["name"] == "manager-renamed"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_removing_direct_share_revokes_access(
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        library_folder_factory,
+    ):
+        folder = await library_folder_factory(
+            name="TemporaryShare",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+
+        share = await async_client.put(
+            f"/api/v1/library/folders/{folder.id}/shares",
+            json={
+                "principal_type": "user",
+                "principal_id": auth_setup["operator_user"]["id"],
+                "role": "viewer",
+            },
+            headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+        )
+        assert share.status_code == 200
+        share_id = share.json()["id"]
+
+        visible = await async_client.get(
+            f"/api/v1/library/folders/{folder.id}",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert visible.status_code == 200
+
+        removed = await async_client.delete(
+            f"/api/v1/library/folders/{folder.id}/shares/{share_id}",
+            headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+        )
+        assert removed.status_code == 204
+
+        hidden = await async_client.get(
+            f"/api/v1/library/folders/{folder.id}",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert hidden.status_code == 404
+
+    async def test_duplicate_metadata_respects_library_visibility(
+        self, async_client, auth_setup, library_folder_factory, library_file_factory
+    ):
+        own = await library_file_factory(created_by_id=auth_setup["operator_user"]["id"], file_hash="same")
+        private = await library_folder_factory(created_by_id=auth_setup["operator2_user"]["id"])
+        other = await library_file_factory(
+            created_by_id=auth_setup["operator2_user"]["id"],
+            folder_id=private.id,
+            file_hash="same",
+        )
+        headers = {"Authorization": f"Bearer {auth_setup['operator_token']}"}
+        details = await async_client.get(f"/api/v1/library/files/{own.id}", headers=headers)
+        assert details.status_code == 200
+        assert not details.json()["duplicates"]
+        assert details.json()["duplicate_count"] == 0
+        listing = await async_client.get("/api/v1/library/files", headers=headers)
+        assert listing.json()[0]["duplicate_count"] == 0
+        edited = await async_client.put(
+            f"/api/v1/library/files/{own.id}",
+            headers=headers,
+            json={"notes": "Safe update"},
+        )
+        assert edited.status_code == 200
+        assert not edited.json()["duplicates"]
+        await self._grant_file(async_client, auth_setup, other.id, "viewer")
+        details = await async_client.get(f"/api/v1/library/files/{own.id}", headers=headers)
+        assert [item["id"] for item in details.json()["duplicates"]] == [other.id]
+
+    async def test_unassigned_admin_decision_survives_startup_backfill(
+        self, async_client, auth_setup, library_folder_factory, library_file_factory, db_session
+    ):
+        from backend.app.core.database import _migrate_library_folder_owners
+
+        folder = await library_folder_factory(created_by_id=auth_setup["operator_user"]["id"])
+        await library_file_factory(folder_id=folder.id, created_by_id=auth_setup["operator_user"]["id"])
+        response = await async_client.patch(
+            f"/api/v1/library/folders/{folder.id}/owner",
+            json={"created_by_id": None},
+            headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+        )
+        assert response.status_code == 200
+        assert await _migrate_library_folder_owners(await db_session.connection()) == 0
+        await db_session.refresh(folder)
+        assert folder.created_by_id is None
+        assert folder.ownership_reviewed is True
+
+    async def test_viewer_cannot_slice_output_into_shared_folder(
+        self, async_client, auth_setup, library_folder_factory, library_file_factory
+    ):
+        folder = await library_folder_factory(created_by_id=auth_setup["operator2_user"]["id"])
+        file = await library_file_factory(
+            folder_id=folder.id,
+            created_by_id=auth_setup["operator2_user"]["id"],
+            filename="model.stl",
+        )
+        await self._grant(async_client, auth_setup, folder.id, "viewer")
+        await self._grant_file(async_client, auth_setup, file.id, "viewer")
+        response = await async_client.post(
+            f"/api/v1/library/files/{file.id}/slice",
+            json={"printer_preset_id": 1, "process_preset_id": 2, "filament_preset_id": 3},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert response.status_code == 403
+
+    async def test_deep_share_shows_navigation_without_siblings_or_files(
+        self, async_client, auth_setup, library_folder_factory, library_file_factory
+    ):
+        owner = auth_setup["operator2_user"]["id"]
+        root = await library_folder_factory(name="klas", created_by_id=owner)
+        parent = await library_folder_factory(name="LADTEA54", parent_id=root.id, created_by_id=owner)
+        leaf = await library_folder_factory(name="Project Turbo", parent_id=parent.id, created_by_id=owner)
+        sibling = await library_folder_factory(name="Private project", parent_id=parent.id, created_by_id=owner)
+        secret = await library_file_factory(folder_id=parent.id, created_by_id=owner)
+        leaf_file = await library_file_factory(folder_id=leaf.id, created_by_id=owner)
+        await self._grant(async_client, auth_setup, leaf.id, "viewer")
+        headers = {"Authorization": f"Bearer {auth_setup['operator_token']}"}
+        tree = (await async_client.get("/api/v1/library/folders", headers=headers)).json()
+        assert len(tree) == 1 and tree[0]["id"] == root.id
+        middle = tree[0]["children"][0]
+        assert middle["id"] == parent.id
+        assert [r["id"] for r in middle["children"]] == [leaf.id]
+        assert tree[0]["navigation_only"] and middle["navigation_only"]
+        assert middle["access_role"] is None and middle["file_count"] == 0
+        assert (await async_client.get(f"/api/v1/library/files?folder_id={parent.id}", headers=headers)).json() == []
+        assert (await async_client.get(f"/api/v1/library/files/{secret.id}", headers=headers)).status_code == 404
+        assert (await async_client.get(f"/api/v1/library/files/{leaf_file.id}", headers=headers)).status_code == 404
+        assert (
+            await async_client.put(f"/api/v1/library/folders/{parent.id}", headers=headers, json={"name": "oops"})
+        ).status_code == 404
+        await self._grant_file(async_client, auth_setup, leaf_file.id, "viewer")
+        listing = await async_client.get(f"/api/v1/library/files?folder_id={leaf.id}", headers=headers)
+        assert [f["id"] for f in listing.json()] == [leaf_file.id]
+        assert sibling.id not in [r["id"] for r in middle["children"]]
+
+    async def test_parent_share_does_not_reveal_children(
+        self, async_client, auth_setup, library_folder_factory, library_file_factory
+    ):
+        root = await library_folder_factory(created_by_id=auth_setup["operator2_user"]["id"])
+        child = await library_folder_factory(parent_id=root.id, created_by_id=auth_setup["operator2_user"]["id"])
+        file = await library_file_factory(folder_id=child.id, created_by_id=auth_setup["operator2_user"]["id"])
+        await self._grant(async_client, auth_setup, root.id, "manager")
+        headers = {"Authorization": f"Bearer {auth_setup['operator_token']}"}
+        tree = (await async_client.get("/api/v1/library/folders", headers=headers)).json()
+        assert tree[0]["children"] == []
+        assert (await async_client.get(f"/api/v1/library/files/{file.id}", headers=headers)).status_code == 404
+        assert (await async_client.delete(f"/api/v1/library/folders/{root.id}", headers=headers)).status_code == 403
+
+    async def test_file_only_share_and_revoke_hide_navigation(
+        self, async_client, auth_setup, library_folder_factory, library_file_factory
+    ):
+        folder = await library_folder_factory(created_by_id=auth_setup["operator2_user"]["id"])
+        file = await library_file_factory(folder_id=folder.id, created_by_id=auth_setup["operator2_user"]["id"])
+        share = await self._grant_file(async_client, auth_setup, file.id, "viewer")
+        headers = {"Authorization": f"Bearer {auth_setup['operator_token']}"}
+        tree = (await async_client.get("/api/v1/library/folders", headers=headers)).json()
+        assert tree[0]["navigation_only"] and tree[0]["file_count"] == 1
+        assert (await async_client.get(f"/api/v1/library/files/{file.id}", headers=headers)).status_code == 200
+        assert (
+            await async_client.put(f"/api/v1/library/files/{file.id}", headers=headers, json={"notes": "oops"})
+        ).status_code == 403
+        assert (
+            await async_client.delete(
+                f"/api/v1/library/files/{file.id}/shares/{share}",
+                headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+            )
+        ).status_code == 204
+        assert (await async_client.get("/api/v1/library/folders", headers=headers)).json() == []
+        assert (await async_client.get(f"/api/v1/library/files/{file.id}", headers=headers)).status_code == 404
+
+    async def test_bulk_grants_are_atomic_and_scoped(self, async_client, auth_setup, library_file_factory):
+        own = await library_file_factory(created_by_id=auth_setup["operator_user"]["id"])
+        foreign = await library_file_factory(created_by_id=auth_setup["operator2_user"]["id"])
+        headers = {"Authorization": f"Bearer {auth_setup['operator_token']}"}
+        data = {
+            "kind": "file",
+            "ids": [own.id, foreign.id],
+            "action": "grant",
+            "principal_type": "user",
+            "principal_id": auth_setup["operator2_user"]["id"],
+            "role": "viewer",
+        }
+        response = await async_client.post("/api/v1/library/access/bulk", headers=headers, json=data)
+        assert response.status_code == 403
+        assert (await async_client.get(f"/api/v1/library/files/{own.id}/shares", headers=headers)).json() == []
+        resources = (await async_client.get("/api/v1/library/access/resources?kind=file", headers=headers)).json()
+        assert [r["id"] for r in resources["items"]] == [own.id]
+        assert (
+            await async_client.post(
+                "/api/v1/library/access/bulk",
+                headers=headers,
+                json={"kind": "file", "ids": [own.id], "action": "owner", "owner_id": None},
+            )
+        ).status_code == 403
+        admin = {"Authorization": f"Bearer {auth_setup['admin_token']}"}
+        response = await async_client.post("/api/v1/library/access/bulk", headers=admin, json=data)
+        assert response.status_code == 200 and response.json()["updated"] == 2
+        response = await async_client.post(
+            "/api/v1/library/access/bulk", headers=admin, json={"kind": "file", "ids": [own.id], "action": "owner"}
+        )
+        assert response.status_code == 422
+        response = await async_client.post(
+            "/api/v1/library/access/bulk",
+            headers=admin,
+            json={"kind": "file", "ids": [own.id], "action": "owner", "owner_id": None},
+        )
+        assert response.status_code == 200
+        assert len((await async_client.get(f"/api/v1/library/files/{own.id}/shares", headers=admin)).json()) == 1
+        data["action"] = "revoke"
+        assert (await async_client.post("/api/v1/library/access/bulk", headers=admin, json=data)).status_code == 200
+        assert (await async_client.get(f"/api/v1/library/files/{own.id}/shares", headers=admin)).json() == []
+
+    async def test_folder_share_does_not_expose_unshared_readme(
+        self, async_client, auth_setup, library_folder_factory, library_file_factory
+    ):
+        folder = await library_folder_factory(created_by_id=auth_setup["operator2_user"]["id"])
+        await library_file_factory(
+            filename="README.md", folder_id=folder.id, created_by_id=auth_setup["operator2_user"]["id"]
+        )
+        await self._grant(async_client, auth_setup, folder.id, "viewer")
+        response = await async_client.get(
+            f"/api/v1/library/folders/{folder.id}/readme",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert response.status_code == 404
+        assert response.json()["detail"] == "No markdown description in folder"
+
+    async def test_external_scan_requires_destination_access(self, async_client, auth_setup, library_folder_factory):
+        folder = await library_folder_factory(
+            is_external=True, external_path="/mnt/test", created_by_id=auth_setup["operator2_user"]["id"]
+        )
+        response = await async_client.post(
+            f"/api/v1/library/folders/{folder.id}/scan",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert response.status_code == 404
+
+    async def test_revoke_reports_ownership_and_navigation_access(
+        self, async_client, auth_setup, library_folder_factory, library_file_factory
+    ):
+        user_id = auth_setup["operator_user"]["id"]
+        folder = await library_folder_factory(created_by_id=auth_setup["operator2_user"]["id"])
+        file = await library_file_factory(folder_id=folder.id, created_by_id=user_id)
+        await self._grant_file(async_client, auth_setup, file.id, "viewer")
+        await self._grant(async_client, auth_setup, folder.id, "viewer")
+        admin = {"Authorization": f"Bearer {auth_setup['admin_token']}"}
+        data = {"kind": "file", "ids": [file.id], "action": "revoke", "principal_type": "user", "principal_id": user_id}
+        result = (await async_client.post("/api/v1/library/access/bulk", headers=admin, json=data)).json()
+        assert result["removed"] == 1 and result["updated"] == 1
+        assert result["retained_access"] == [{"id": file.id, "reason": "Ownership"}]
+        result = (await async_client.post("/api/v1/library/access/bulk", headers=admin, json=data)).json()
+        assert result["removed"] == 0 and result["updated"] == 0
+        data.update(kind="folder", ids=[folder.id])
+        result = (await async_client.post("/api/v1/library/access/bulk", headers=admin, json=data)).json()
+        assert result["removed"] == 1
+        assert result["retained_access"] == [{"id": folder.id, "reason": "Navigation to accessible files or folders"}]
+        headers = {"Authorization": f"Bearer {auth_setup['operator_token']}"}
+        tree = (await async_client.get("/api/v1/library/folders", headers=headers)).json()
+        assert tree[0]["id"] == folder.id and tree[0]["navigation_only"]
+
+    async def _grant_file(self, client, setup, file_id, role, *, principal_id=None, principal_type="user"):
+        response = await client.put(
+            f"/api/v1/library/files/{file_id}/shares",
+            headers={"Authorization": f"Bearer {setup['admin_token']}"},
+            json={
+                "principal_type": principal_type,
+                "principal_id": principal_id or setup["operator_user"]["id"],
+                "role": role,
+            },
+        )
+        assert response.status_code == 200, response.text
+        return response.json()["id"]
+
+    async def _grant(self, client, setup, folder_id, role, *, principal_id=None, principal_type="user"):
+        response = await client.put(
+            f"/api/v1/library/folders/{folder_id}/shares",
+            headers={"Authorization": f"Bearer {setup['admin_token']}"},
+            json={
+                "principal_type": principal_type,
+                "principal_id": principal_id or setup["operator_user"]["id"],
+                "role": role,
+            },
+        )
+        assert response.status_code == 200, response.text
+        return response.json()["id"]
+
+    @pytest.mark.parametrize("bulk", [False, True])
+    @pytest.mark.parametrize("to_root", [False, True])
+    async def test_manager_move_cannot_change_other_users_access(
+        self, async_client, auth_setup, library_folder_factory, library_file_factory, db_session, bulk, to_root
+    ):
+        source = await library_folder_factory(created_by_id=auth_setup["operator2_user"]["id"])
+        destination = await library_folder_factory(created_by_id=auth_setup["operator_user"]["id"])
+        file = await library_file_factory(folder_id=source.id, created_by_id=auth_setup["operator2_user"]["id"])
+        source_id, file_id = source.id, file.id
+        await self._grant(async_client, auth_setup, source.id, "manager")
+        headers = {"Authorization": f"Bearer {auth_setup['operator_token']}"}
+        if bulk:
+            response = await async_client.post(
+                "/api/v1/library/files/move",
+                headers=headers,
+                json={"file_ids": [file_id], "folder_id": None if to_root else destination.id},
+            )
+            assert response.status_code == 200
+            assert response.json()["moved"] == 0
+            assert response.json()["skipped"] == 1
+        else:
+            response = await async_client.put(
+                f"/api/v1/library/files/{file_id}",
+                headers=headers,
+                json={"folder_id": 0 if to_root else destination.id},
+            )
+            assert response.status_code == 403
+        await db_session.refresh(file)
+        assert file.folder_id == source_id
+
+    async def test_manager_can_move_foreign_file__with_direct_file_and_destination_grants(
+        self, async_client, auth_setup, library_folder_factory, library_file_factory, db_session
+    ):
+        parent = await library_folder_factory(created_by_id=auth_setup["operator2_user"]["id"])
+        source = await library_folder_factory(parent_id=parent.id, created_by_id=auth_setup["operator2_user"]["id"])
+        destination = await library_folder_factory(
+            parent_id=parent.id, created_by_id=auth_setup["operator2_user"]["id"]
+        )
+        await self._grant(async_client, auth_setup, parent.id, "manager")
+        file = await library_file_factory(folder_id=source.id, created_by_id=auth_setup["operator2_user"]["id"])
+        await self._grant_file(async_client, auth_setup, file.id, "manager")
+        await self._grant(async_client, auth_setup, destination.id, "contributor")
+        owner_id, destination_id = file.created_by_id, destination.id
+        response = await async_client.post(
+            "/api/v1/library/files/move",
+            json={"file_ids": [file.id], "folder_id": destination_id},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert response.status_code == 200
+        assert response.json()["moved"] == 1
+        await db_session.refresh(file)
+        assert file.folder_id == destination_id
+        assert file.created_by_id == owner_id
+
+    @pytest.mark.parametrize("to_root", [False, True])
+    async def test_manager_folder_move_does_not_change_direct_access(
+        self, async_client, auth_setup, library_folder_factory, library_file_factory, to_root
+    ):
+        parent = await library_folder_factory(created_by_id=auth_setup["operator2_user"]["id"])
+        child = await library_folder_factory(parent_id=parent.id, created_by_id=auth_setup["operator_user"]["id"])
+        await library_file_factory(folder_id=child.id, created_by_id=auth_setup["operator2_user"]["id"])
+        await self._grant(async_client, auth_setup, parent.id, "manager")
+        destination = await library_folder_factory(created_by_id=auth_setup["operator_user"]["id"])
+        response = await async_client.put(
+            f"/api/v1/library/folders/{child.id}",
+            json={"parent_id": 0 if to_root else destination.id},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert response.status_code == 200
+
+    @pytest.mark.parametrize("role", [None, "viewer", "contributor"])
+    async def test_restore_requires_current_destination_write_access(
+        self, async_client, auth_setup, library_folder_factory, library_file_factory, db_session, role
+    ):
+        folder = await library_folder_factory(created_by_id=auth_setup["operator2_user"]["id"])
+        file = await library_file_factory(folder_id=folder.id, created_by_id=auth_setup["operator_user"]["id"])
+        share_id = await self._grant(async_client, auth_setup, folder.id, "contributor")
+        headers = {"Authorization": f"Bearer {auth_setup['operator_token']}"}
+        assert (await async_client.delete(f"/api/v1/library/files/{file.id}", headers=headers)).status_code == 200
+        if role is None:
+            assert (
+                await async_client.delete(
+                    f"/api/v1/library/folders/{folder.id}/shares/{share_id}",
+                    headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+                )
+            ).status_code == 204
+        else:
+            await self._grant(async_client, auth_setup, folder.id, role)
+        response = await async_client.post(f"/api/v1/library/trash/{file.id}/restore", headers=headers)
+        assert response.status_code == (200 if role == "contributor" else 403)
+        await db_session.refresh(file)
+        assert (file.deleted_at is None) == (role == "contributor")
+
+    async def test_shared_manager_can_restore_collaborative_file(
+        self, async_client, auth_setup, library_folder_factory, library_file_factory
+    ):
+        folder = await library_folder_factory(created_by_id=auth_setup["operator2_user"]["id"])
+        file = await library_file_factory(folder_id=folder.id, created_by_id=auth_setup["operator2_user"]["id"])
+        await self._grant(async_client, auth_setup, folder.id, "manager")
+        await self._grant_file(async_client, auth_setup, file.id, "manager")
+        headers = {"Authorization": f"Bearer {auth_setup['operator_token']}"}
+        assert (await async_client.delete(f"/api/v1/library/files/{file.id}", headers=headers)).status_code == 200
+        trash = await async_client.get("/api/v1/library/trash", headers=headers)
+        assert file.id in [item["id"] for item in trash.json()["items"]]
+        assert (await async_client.post(f"/api/v1/library/trash/{file.id}/restore", headers=headers)).status_code == 200
+
+    @pytest.mark.parametrize("role,expected", [("viewer", 403), ("contributor", 403), ("manager", 200)])
+    async def test_shared_folder_deletion_uses_manager_role(
+        self, async_client, auth_setup, library_folder_factory, library_file_factory, role, expected
+    ):
+        parent = await library_folder_factory(created_by_id=auth_setup["operator2_user"]["id"])
+        child = await library_folder_factory(parent_id=parent.id, created_by_id=auth_setup["operator2_user"]["id"])
+        file = await library_file_factory(folder_id=child.id, created_by_id=auth_setup["operator2_user"]["id"])
+        await self._grant(async_client, auth_setup, parent.id, role)
+        await self._grant(async_client, auth_setup, child.id, role)
+        await self._grant_file(async_client, auth_setup, file.id, role)
+        response = await async_client.delete(
+            f"/api/v1/library/folders/{parent.id}",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert response.status_code == expected
+
+    async def test_shared_manager_bulk_deletes_folder_tree(
+        self, async_client, auth_setup, library_folder_factory, library_file_factory
+    ):
+        folder = await library_folder_factory(created_by_id=auth_setup["operator2_user"]["id"])
+        file = await library_file_factory(folder_id=folder.id, created_by_id=auth_setup["operator2_user"]["id"])
+        await self._grant(async_client, auth_setup, folder.id, "manager")
+        await self._grant_file(async_client, auth_setup, file.id, "manager")
+        response = await async_client.post(
+            "/api/v1/library/bulk-delete",
+            json={"file_ids": [], "folder_ids": [folder.id]},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert response.status_code == 200
+        assert response.json()["deleted_folders"] == 1
+
+    async def test_external_subtree_does_not_inherit_sharing(self, async_client, auth_setup, library_folder_factory):
+        parent = await library_folder_factory(created_by_id=auth_setup["operator2_user"]["id"])
+        external = await library_folder_factory(parent_id=parent.id, is_external=True, external_path="/mnt/test")
+        await self._grant(async_client, auth_setup, parent.id, "manager")
+        headers = {"Authorization": f"Bearer {auth_setup['operator_token']}"}
+        assert (await async_client.get(f"/api/v1/library/folders/{external.id}", headers=headers)).status_code == 404
+        assert (await async_client.delete(f"/api/v1/library/folders/{parent.id}", headers=headers)).status_code == 403
+
+    @pytest.mark.parametrize("role,expected", [("viewer", 403), ("contributor", 200)])
+    async def test_makerworld_import_requires_contributor_destination(
+        self, async_client, auth_setup, library_folder_factory, db_session, role, expected
+    ):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, patch
+
+        from backend.app.models.user import User
+        from backend.app.services.model_providers.base import (
+            ProviderDownload,
+            ProviderDownloadInfo,
+            ProviderResourceRef,
+        )
+
+        folder = await library_folder_factory(created_by_id=auth_setup["operator2_user"]["id"])
+        await self._grant(async_client, auth_setup, folder.id, role)
+        user = await db_session.get(User, auth_setup["operator_user"]["id"])
+        saved = SimpleNamespace(id=999, folder_id=folder.id, filename="test.3mf", source_url="test")
+        service = AsyncMock()
+        service.get_download.return_value = ProviderDownloadInfo(
+            ref=ProviderResourceRef(source_type="makerworld", external_id="1", sub_id="2"),
+            url="https://example.com/test.3mf",
+            suggested_filename="test.3mf",
+        )
+        service.download.return_value = ProviderDownload(file_bytes=b"data", filename="test.3mf")
+        with (
+            patch("backend.app.api.routes.makerworld._authorize_for_provider", AsyncMock(return_value=user)),
+            patch("backend.app.api.routes.makerworld._build_service", AsyncMock(return_value=service)),
+            patch(
+                "backend.app.api.routes.makerworld.save_3mf_bytes_to_library", AsyncMock(return_value=(saved, False))
+            ),
+        ):
+            response = await async_client.post(
+                "/api/v1/makerworld/import",
+                json={"model_id": 1, "profile_id": 2, "folder_id": folder.id},
+                headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+            )
+        assert response.status_code == expected, response.text
+        if expected == 403:
+            service.get_download.assert_not_awaited()
+
+    # ========================================================================
+    # Folder update/delete ownership (#3201)
+    # ========================================================================
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_operator_can_update_own_folder(self, async_client: AsyncClient, auth_setup, library_folder_factory):
+        folder = await library_folder_factory(
+            name="OldName",
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+
+        response = await async_client.put(
+            f"/api/v1/library/folders/{folder.id}",
+            json={"name": "NewName"},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["name"] == "NewName"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_operator_cannot_update_other_users_folder(
+        self, async_client: AsyncClient, auth_setup, library_folder_factory
+    ):
+        folder = await library_folder_factory(
+            name="OtherOwnedFolder",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+
+        response = await async_client.put(
+            f"/api/v1/library/folders/{folder.id}",
+            json={"name": "Nope"},
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_operator_can_delete_own_empty_folder(
+        self, async_client: AsyncClient, auth_setup, library_folder_factory
+    ):
+        folder = await library_folder_factory(
+            name="EmptyFolder",
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
 
         response = await async_client.delete(
             f"/api/v1/library/folders/{folder.id}",
@@ -1075,11 +2377,30 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_operator_cannot_delete_other_users_empty_folder(
+        self, async_client: AsyncClient, auth_setup, library_folder_factory
+    ):
+        folder = await library_folder_factory(
+            name="OtherEmpty",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+
+        response = await async_client.delete(
+            f"/api/v1/library/folders/{folder.id}",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 403
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_viewer_cannot_delete_empty_folder(
         self, async_client: AsyncClient, auth_setup, library_folder_factory
     ):
-        """No delete permission at all still means no folder deletion."""
-        folder = await library_folder_factory(name="EmptyFolder")
+        folder = await library_folder_factory(
+            name="EmptyFolder",
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
 
         response = await async_client.delete(
             f"/api/v1/library/folders/{folder.id}",
@@ -1090,34 +2411,37 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_operator_cannot_delete_folder_with_files(
+    async def test_operator_can_delete_own_folder_with_own_files(
         self, async_client: AsyncClient, auth_setup, library_folder_factory, library_file_factory
     ):
-        """Non-empty folders still require library:delete_all."""
-        folder = await library_folder_factory(name="FullFolder")
-        await library_file_factory(folder_id=folder.id, created_by_id=auth_setup["operator_user"]["id"])
+        folder = await library_folder_factory(
+            name="FullFolder",
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+        await library_file_factory(
+            folder_id=folder.id,
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
 
         response = await async_client.delete(
             f"/api/v1/library/folders/{folder.id}",
             headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
         )
 
-        assert response.status_code == 403
+        assert response.status_code == 200
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_operator_cannot_delete_folder_with_trashed_file(
+    async def test_folder_owner_cannot_delete_unshared_collaborative_files(
         self, async_client: AsyncClient, auth_setup, library_folder_factory, library_file_factory
     ):
-        """Trashed files count as content: cascade would hard-drop them and
-        silently break trash restore for their owner."""
-        from datetime import datetime, timezone
-
-        folder = await library_folder_factory(name="TrashedContentFolder")
+        folder = await library_folder_factory(
+            name="MixedOwnership",
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
         await library_file_factory(
             folder_id=folder.id,
             created_by_id=auth_setup["operator2_user"]["id"],
-            deleted_at=datetime.now(timezone.utc),
         )
 
         response = await async_client.delete(
@@ -1129,12 +2453,40 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_operator_cannot_delete_folder_with_subfolder(
+    async def test_operator_can_delete_owned_folder_with_owned_subfolder(
         self, async_client: AsyncClient, auth_setup, library_folder_factory
     ):
-        """A folder containing subfolders (even empty ones) is not empty."""
-        parent = await library_folder_factory(name="ParentFolder")
-        await library_folder_factory(name="ChildFolder", parent_id=parent.id)
+        parent = await library_folder_factory(
+            name="ParentFolder",
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+        await library_folder_factory(
+            name="ChildFolder",
+            parent_id=parent.id,
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+
+        response = await async_client.delete(
+            f"/api/v1/library/folders/{parent.id}",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+
+        assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_folder_owner_cannot_delete_unshared_collaborative_subfolder(
+        self, async_client: AsyncClient, auth_setup, library_folder_factory
+    ):
+        parent = await library_folder_factory(
+            name="ParentFolder",
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+        await library_folder_factory(
+            name="OtherChild",
+            parent_id=parent.id,
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
 
         response = await async_client.delete(
             f"/api/v1/library/folders/{parent.id}",
@@ -1148,9 +2500,12 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
     async def test_operator_cannot_delete_external_folder(
         self, async_client: AsyncClient, auth_setup, library_folder_factory
     ):
-        """Deleting an external folder unmounts an operator-configured mount
-        for everyone — stays behind library:delete_all even when empty."""
-        folder = await library_folder_factory(name="ExternalFolder", is_external=True, external_path="/mnt/models")
+        folder = await library_folder_factory(
+            name="ExternalFolder",
+            created_by_id=auth_setup["operator_user"]["id"],
+            is_external=True,
+            external_path="/mnt/models",
+        )
 
         response = await async_client.delete(
             f"/api/v1/library/folders/{folder.id}",
@@ -1164,8 +2519,6 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
     async def test_operator_cannot_delete_linked_folder(
         self, async_client: AsyncClient, auth_setup, library_folder_factory, db_session
     ):
-        """Project/archive links are created via update_all, so unlinking by
-        deletion stays admin-only even for empty folders."""
         from backend.app.models.project import Project
 
         project = Project(name="LinkTestProject")
@@ -1173,7 +2526,11 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
         await db_session.commit()
         await db_session.refresh(project)
 
-        folder = await library_folder_factory(name="LinkedFolder", project_id=project.id)
+        folder = await library_folder_factory(
+            name="LinkedFolder",
+            project_id=project.id,
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
 
         response = await async_client.delete(
             f"/api/v1/library/folders/{folder.id}",
@@ -1187,9 +2544,11 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
     async def test_admin_can_delete_folder_with_contents(
         self, async_client: AsyncClient, auth_setup, library_folder_factory, library_file_factory
     ):
-        """library:delete_all keeps full cascade deletion."""
         folder = await library_folder_factory(name="AdminFolder")
-        await library_file_factory(folder_id=folder.id, created_by_id=auth_setup["operator_user"]["id"])
+        await library_file_factory(
+            folder_id=folder.id,
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
 
         response = await async_client.delete(
             f"/api/v1/library/folders/{folder.id}",
@@ -1200,18 +2559,27 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_bulk_delete_operator_folders_empty_only(
+    async def test_bulk_delete_operator_folders_respects_ownership(
         self, async_client: AsyncClient, auth_setup, library_folder_factory, library_file_factory
     ):
-        """Bulk delete applies the same rule: empty folders go, non-empty are skipped."""
-        empty_folder = await library_folder_factory(name="BulkEmpty")
-        full_folder = await library_folder_factory(name="BulkFull")
-        await library_file_factory(folder_id=full_folder.id, created_by_id=auth_setup["operator2_user"]["id"])
+        """Bulk deletion must preserve unshared foreign contents."""
+        own_folder = await library_folder_factory(
+            name="BulkOwn",
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+        mixed_folder = await library_folder_factory(
+            name="BulkMixed",
+            created_by_id=auth_setup["operator_user"]["id"],
+        )
+        await library_file_factory(
+            folder_id=mixed_folder.id,
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
 
         response = await async_client.post(
             "/api/v1/library/bulk-delete",
             headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
-            json={"file_ids": [], "folder_ids": [empty_folder.id, full_folder.id]},
+            json={"file_ids": [], "folder_ids": [own_folder.id, mixed_folder.id]},
         )
 
         assert response.status_code == 200
@@ -1660,7 +3028,7 @@ class TestReadIDORClosure(TestOwnershipPermissionsSetup):
 _WRITE_SUBRESOURCE_ROUTES = [
     ("favorite", "post", "/favorite", {}),
     ("timelapse_delete", "delete", "/timelapse", {}),
-    ("photo_upload", "post", "/photos", {"files": {"file": ("x.jpg", b"\x89PNG\r\n\x1a\n", "image/jpeg")}}),
+    ("photo_upload", "post", "/photos", {"files": {"file": ("x.jpg", b"\x89PNG\n\x1a\n", "image/jpeg")}}),
     ("photo_delete", "delete", "/photos/nonexistent.jpg", {}),
     ("project_page", "patch", "/project-page", {"json": {"title": "hijacked"}}),
     ("source_upload", "post", "/source", {"files": {"file": ("x.3mf", b"PK\x03\x04", "application/octet-stream")}}),
@@ -2138,3 +3506,129 @@ class TestLibraryAddToQueueOwnership(TestOwnershipPermissionsSetup):
         )
         # READ_ALL sees it and reaches the on-disk check.
         assert admin.json()["detail"]["errors"][0]["error"] == "File not found on disk"
+
+
+class TestLibraryAccessOverview(TestOwnershipPermissionsSetup):
+    """The admin review reports uncertainty without inferring ownership."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_overview_is_admin_only_and_reports_legacy_evidence(
+        self,
+        async_client: AsyncClient,
+        auth_setup,
+        db_session,
+    ):
+        from backend.app.models.group import Group
+        from backend.app.models.library import LibraryFile, LibraryFolderShare
+
+        parent = LibraryFolder(
+            name="Teacher project",
+            parent_id=None,
+            created_by_id=auth_setup["operator2_user"]["id"],
+            is_external=False,
+            external_readonly=False,
+            external_show_hidden=False,
+        )
+        db_session.add(parent)
+        await db_session.flush()
+
+        child = LibraryFolder(
+            name="Legacy student work",
+            parent_id=parent.id,
+            created_by_id=None,
+            is_external=False,
+            external_readonly=False,
+            external_show_hidden=False,
+        )
+        external = LibraryFolder(
+            name="NAS mount",
+            parent_id=None,
+            created_by_id=None,
+            is_external=True,
+            external_readonly=True,
+            external_show_hidden=False,
+        )
+        db_session.add_all([child, external])
+        await db_session.flush()
+
+        group = Group(name="Class 3B", description="Project contributors", permissions=[])
+        db_session.add(group)
+        await db_session.flush()
+
+        db_session.add_all(
+            [
+                LibraryFile(
+                    filename="student-a.3mf",
+                    file_path="library/student-a.3mf",
+                    file_type="3mf",
+                    file_size=10,
+                    folder_id=child.id,
+                    created_by_id=auth_setup["operator_user"]["id"],
+                ),
+                LibraryFile(
+                    filename="student-b.3mf",
+                    file_path="library/student-b.3mf",
+                    file_type="3mf",
+                    file_size=10,
+                    folder_id=child.id,
+                    created_by_id=auth_setup["operator2_user"]["id"],
+                ),
+                LibraryFile(
+                    filename="legacy.3mf",
+                    file_path="library/legacy.3mf",
+                    file_type="3mf",
+                    file_size=10,
+                    folder_id=child.id,
+                    created_by_id=None,
+                ),
+            ]
+        )
+        db_session.add_all(
+            [
+                LibraryFolderShare(
+                    folder_id=parent.id,
+                    user_id=auth_setup["operator_user"]["id"],
+                    group_id=None,
+                    role="contributor",
+                    created_by_id=auth_setup["operator2_user"]["id"],
+                ),
+                LibraryFolderShare(
+                    folder_id=child.id,
+                    user_id=None,
+                    group_id=group.id,
+                    role="viewer",
+                    created_by_id=auth_setup["operator2_user"]["id"],
+                ),
+            ]
+        )
+        await db_session.commit()
+
+        forbidden = await async_client.get(
+            "/api/v1/library/access-overview/folders",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+        )
+        assert forbidden.status_code == 403
+
+        response = await async_client.get(
+            "/api/v1/library/access-overview/folders",
+            headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+        )
+        assert response.status_code == 200
+        items = {item["id"]: item for item in response.json()}
+
+        assert child.id in items
+        row = items[child.id]
+        assert row["path"] == "Teacher project / Legacy student work"
+        assert row["created_by_id"] is None
+        assert row["file_count"] == 3
+        assert row["distinct_file_owners"] == 2
+        assert row["ownerless_file_count"] == 1
+        assert row["is_ambiguous"] is True
+        assert [(share["principal_name"], share["role"]) for share in row["direct_shares"]] == [("Class 3B", "viewer")]
+        assert [(share["principal_name"], share["role"]) for share in row["inherited_shares"]] == []
+
+        # Reviewing ambiguous legacy contents does not reassign folder ownership.
+        await db_session.refresh(child)
+        assert child.created_by_id is None
+        assert external.id not in items
